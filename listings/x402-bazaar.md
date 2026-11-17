@@ -15,24 +15,16 @@ The manual directory alternative is x402scan
 (https://www.x402scan.com/resources/register — paste a URL, it validates
 the 402 and lists it, no account needed).
 
-## x402scan submission — BLOCKED on x402 v2 (2026-11-17)
+## x402scan submission — LISTED (2026-11-17)
 
-Submitted https://lgda-music.fly.dev/stream?track_id=midnight&session_id=x402scan
-via the register form. x402scan discovered the API ("LGDA Autonomic
-Pacing Node", 27 tracks / 9 albums, 14 resources found) but accepted 0:
-`/stream` failed with "x402 v1 response detected — migrate to v2 spec"
-and the registration failed. It also flagged two warnings: serve
-/favicon.ico, and add info.contact.email to openapi.json. Resubmitting
-the same v1 URL will fail the same way. The fix is serving x402 v2
-(dual-serve recommended: v1-readable body + canonical v2
-PAYMENT-REQUIRED header, so existing v1 clients keep working). v2
-changes: headers X-PAYMENT→PAYMENT-SIGNATURE,
-X-PAYMENT-RESPONSE→PAYMENT-RESPONSE, 402 challenge in base64
-PAYMENT-REQUIRED header; networks as CAIP-2 (base → eip155:8453,
-base-sepolia → eip155:84532); accepts[].maxAmountRequired→amount;
-x402Version 2; payment payload echoes the chosen option as `accepted`;
-the EIP-3009 authorization signature itself is unchanged for exact/EVM,
-and the facilitator accepts both versions.
+First attempt FAILED: "x402 v1 response detected — migrate to v2 spec"
+(the node spoke v1 only), plus warnings for a missing /favicon.ico and
+no info.contact.email in openapi.json. Fixed in v2.1.0 (dual-serve v2
+header + v1 body, favicon, contact email) and resubmitted — SUCCEEDED:
+**https://www.x402scan.com/server/12a3231a-7a98-426c-9939-f7ca68d09af8**
+("LGDA Autonomic Pacing Node", POST /stream, $5.99, v2 badge, favicon
+showing, no warnings). Activity is 0 transactions / $0.00 so far — the
+listing is live, waiting for the first real buyer.
 
 ## Listing
 
