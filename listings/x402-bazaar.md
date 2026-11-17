@@ -1,7 +1,19 @@
 # x402 Bazaar — draft listing
 
 **Status: DRAFT — submit only after v2 is deployed and the audio files are loaded.**
-Bazaar: https://www.x402bazaar.com (x402 ecosystem directory for paid services).
+Bazaar: the x402 discovery layer. IMPORTANT (verified 2026-11-17):
+`www.x402bazaar.com` is a parked domain for sale — it is NOT the Bazaar.
+The real Bazaar is Coinbase's discovery index (browse at
+https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources, public,
+no key needed) and it has NO submission form: a resource is cataloged
+automatically the first time a payment for it settles through a
+facilitator that runs a discovery index (CDP or x402.org). Each index is
+independent — settling through one lists you on that one only. For
+richer discovery metadata, the 402 response should carry the `bazaar`
+extension (x402 v2); our node speaks x402 v1 and does not declare it yet.
+The manual directory alternative is x402scan
+(https://www.x402scan.com/resources/register — paste a URL, it validates
+the 402 and lists it, no account needed).
 
 ## Listing
 
