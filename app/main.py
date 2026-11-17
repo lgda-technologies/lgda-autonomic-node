@@ -1,5 +1,5 @@
 """
-LGDA Autonomic Pacing Node — v2.0.0.
+LGDA Autonomic Pacing Node — v2.1.0.
 
 What this is: a machine-readable front door for LGDA Technologies'
 wellness music catalog (https://lgda-technologies.base44.app).
@@ -14,8 +14,11 @@ What changed from v1 (see README.md for the full list):
   503 "audio file not yet loaded for this track".
 - v1 returned {"detail": "Not Found"} at GET /. v2 serves a real
   homepage there explaining the node.
-- Each track carries its History session evidence (RMSSD/HR) in
-  the catalog; tracks with no sessions report session_count 0.
+- v2.1.0 speaks x402 v1 AND v2 (dual-serve): the 402 carries the
+  canonical v2 PaymentRequired object in the PAYMENT-REQUIRED header
+  and the v1 object in the body; payments are accepted on either the
+  PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1) header. The EIP-3009
+  authorization itself is identical in both versions.
 
 Wording: "wellness music". Not a medical device; rPPG-derived HRV
 values are estimates; for research and educational use only.
@@ -84,6 +87,11 @@ DISCLAIMER = (
 USDC_ASSETS = {
     "base-sepolia": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
     "base": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+}
+# x402 v2 identifies networks as CAIP-2 ids (v1 used plain names).
+CAIP2_NETWORKS = {
+    "base-sepolia": "eip155:84532",
+    "base": "eip155:8453",
 }
 TRACK_PRICE_USD = 5.99
 ALBUM_PRICE_USD = 14.99
@@ -192,7 +200,8 @@ app = FastAPI(
         "with MCP discovery and signed HRV session receipts. "
         + DISCLAIMER
     ),
-    version="2.0.0",
+    version="2.1.0",
+    contact={"name": "LGDA Technologies", "email": "solheefinery@gmail.com"},
 )
 
 # ---------------------------------------------------------------- helpers
@@ -204,7 +213,15 @@ def usdc_asset(network: str) -> str:
         raise HTTPException(500, f"Unsupported X402_NETWORK: {network}")
 
 
+def caip2_network(network: str) -> str:
+    try:
+        return CAIP2_NETWORKS[network]
+    except KeyError:
+        raise HTTPException(500, f"Unsupported X402_NETWORK: {network}")
+
+
 def x402_accepts(price_atomic: int, resource: str, description: str) -> dict:
+    """v1 PaymentRequirements (kept for v1 clients)."""
     return {
         "scheme": "exact",
         "network": X402_NETWORK,
@@ -219,14 +236,59 @@ def x402_accepts(price_atomic: int, resource: str, description: str) -> dict:
     }
 
 
+def x402_accepts_v2(price_atomic: int) -> dict:
+    """v2 PaymentRequirements: CAIP-2 network, `amount` (not
+    maxAmountRequired); resource/description live on the
+    PaymentRequired.resource object instead."""
+    return {
+        "scheme": "exact",
+        "network": caip2_network(X402_NETWORK),
+        "amount": str(price_atomic),
+        "asset": usdc_asset(X402_NETWORK),
+        "payTo": PAY_TO_ADDRESS,
+        "maxTimeoutSeconds": 120,
+        "extra": {"name": "USDC", "version": "2"},
+    }
+
+
+def x402_payment_required_v2(price_atomic: int, resource: str, description: str) -> dict:
+    """v2 PaymentRequired object (goes in the PAYMENT-REQUIRED header)."""
+    return {
+        "x402Version": 2,
+        "error": "PAYMENT-SIGNATURE header is required",
+        "resource": {
+            "url": resource,
+            "description": description,
+            "mimeType": "audio/mpeg",
+            "serviceName": "LGDA Music",
+            "tags": ["music", "wellness", "hrv"],
+            "iconUrl": f"{BASE_URL}/favicon.ico",
+        },
+        "accepts": [x402_accepts_v2(price_atomic)],
+        "extensions": {},
+    }
+
+
 def x402_402(price_atomic: int, resource: str, description: str) -> JSONResponse:
-    """402 response matching v1 behaviour: X-PAYMENT header required."""
+    """Dual-serve 402: canonical v2 PaymentRequired in the
+    PAYMENT-REQUIRED header (base64 JSON), v1 object in the body.
+    v2 clients read the header and ignore the body; v1 clients
+    parse the body and ignore the header. Verified pattern per the
+    x402 v2 HTTP transport spec."""
     return JSONResponse(
         status_code=402,
         content={
             "x402Version": 1,
             "error": "X-PAYMENT header is required",
             "accepts": [x402_accepts(price_atomic, resource, description)],
+        },
+        headers={
+            "PAYMENT-REQUIRED": _b64(
+                json.dumps(
+                    x402_payment_required_v2(price_atomic, resource, description),
+                    separators=(",", ":"),
+                ).encode()
+            )
         },
     )
 
@@ -236,7 +298,7 @@ def _facilitator_post(path: str, payload: dict) -> dict:
     # which 403s urllib's default "Python-urllib/3.12" User-Agent.
     # Verified 2026-11-17: this UA passes, urllib's does not.
     with httpx.Client(timeout=15, headers={
-            "User-Agent": "lgda-music-node/2.0.0"}) as client:
+            "User-Agent": "lgda-music-node/2.1.0"}) as client:
         resp = client.post(X402_FACILITATOR_URL.rstrip("/") + path,
                            json=payload)
         resp.raise_for_status()
@@ -244,9 +306,9 @@ def _facilitator_post(path: str, payload: dict) -> dict:
 
 
 def _decode_payment_header(payment_header: str) -> dict:
-    """Decode an X-PAYMENT header to the payment payload object.
-
-    x402 clients send base64-encoded JSON; accept raw JSON too.
+    """Decode a PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1) header to the
+    payment payload object. x402 clients send base64-encoded JSON;
+    accept raw JSON too.
     """
     try:
         return json.loads(base64.b64decode(payment_header).decode())
@@ -254,11 +316,17 @@ def _decode_payment_header(payment_header: str) -> dict:
         return json.loads(payment_header)
 
 
-def verify_and_settle_payment(payment_header: str, requirements: dict) -> dict:
+def verify_and_settle_payment(payment_header: str, price_atomic: int,
+                              resource: str, description: str) -> dict:
     """Verify + settle an x402 payment via the facilitator.
 
-    Returns the settle result (with transaction hash) or raises
-    HTTPException 402. No audio is served on an unverified payment.
+    Version-aware: the payload's x402Version picks the facilitator
+    dialect (v1: X-PAYMENT shape, plain network names; v2:
+    PAYMENT-SIGNATURE shape, CAIP-2 network, `accepted` envelope).
+    The EIP-3009 authorization inside is identical in both versions,
+    and the facilitator accepts both. Returns the settle result (with
+    transaction hash) or raises HTTPException 402. No audio is served
+    on an unverified payment.
 
     NOTE: the live facilitator (x402.org) expects the decoded
     `paymentPayload` object, not the base64 `paymentHeader` string —
@@ -269,9 +337,16 @@ def verify_and_settle_payment(payment_header: str, requirements: dict) -> dict:
         payment_payload = _decode_payment_header(payment_header)
     except Exception as exc:
         raise HTTPException(402, f"Payment header is not valid JSON: {exc}")
+    version = payment_payload.get("x402Version", 1)
+    if version == 2:
+        requirements = x402_accepts_v2(price_atomic)
+    elif version == 1:
+        requirements = x402_accepts(price_atomic, resource, description)
+    else:
+        raise HTTPException(402, f"Unsupported x402Version: {version}")
     try:
         verified = _facilitator_post("/verify", {
-            "x402Version": 1,
+            "x402Version": version,
             "paymentPayload": payment_payload,
             "paymentRequirements": requirements,
         })
@@ -281,7 +356,7 @@ def verify_and_settle_payment(payment_header: str, requirements: dict) -> dict:
         raise HTTPException(402, f"Payment invalid: {verified.get('invalidReason', 'unknown')}")
     try:
         settled = _facilitator_post("/settle", {
-            "x402Version": 1,
+            "x402Version": version,
             "paymentPayload": payment_payload,
             "paymentRequirements": requirements,
         })
@@ -338,7 +413,7 @@ def album_or_404(album_id: str) -> dict:
 
 HOMEPAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>LGDA Autonomic Pacing Node</title></head><body>
-<h1>LGDA Autonomic Pacing Node (v2.0.0)</h1>
+<h1>LGDA Autonomic Pacing Node (v2.1.0)</h1>
 <p>Machine-readable front door for the LGDA Technologies wellness music
 catalog — 27 tracks across 9 albums. AI agents discover this node via
 the <a href="/mcp">MCP manifest</a>, pay per track ($5.99) or album
@@ -369,15 +444,22 @@ def healthz():
     loaded = sum(1 for t in TRACKS if audio_path(t).exists())
     return {
         "status": "ok",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "tracks": len(TRACKS),
         "albums": len(ALBUMS),
         "audio_files_loaded": loaded,
         "audio_files_missing": len(TRACKS) - loaded,
         "networks": [X402_NETWORK],
+        "x402_versions": [1, 2],
         "receipt_key_ephemeral": False,
         "stripe": {"enabled": bool(STRIPE_SECRET_KEY), "livemode": None, "webhook": False},
     }
+
+
+@app.get("/favicon.ico", tags=["ops"])
+def favicon():
+    """Site icon (also the iconUrl in the v2 PaymentRequired object)."""
+    return FileResponse(ROOT / "app" / "static" / "favicon.png", media_type="image/png")
 
 
 @app.get("/.well-known/receipt-key", tags=["receipts"])
@@ -433,6 +515,9 @@ def track_purchase(track_id: str, session_id: str) -> dict:
             "accepts": [x402_accepts(TRACK_PRICE_ATOMIC, resource, f"Wellness music track: {track['title']} (MP3)")],
             "facilitator": X402_FACILITATOR_URL,
         },
+        "x402_v2": x402_payment_required_v2(
+            TRACK_PRICE_ATOMIC, resource, f"Wellness music track: {track['title']} (MP3)"
+        ),
         "verify_session_url": f"{BASE_URL}/verify-session",
         "audio_loaded": audio_path(track_id).exists(),
         "disclaimer": DISCLAIMER,
@@ -458,6 +543,9 @@ def album_purchase(album_id: str, session_id: str) -> dict:
             "accepts": [x402_accepts(ALBUM_PRICE_ATOMIC, resource, f"Wellness music album: {album['title']} (3 MP3 tracks)")],
             "facilitator": X402_FACILITATOR_URL,
         },
+        "x402_v2": x402_payment_required_v2(
+            ALBUM_PRICE_ATOMIC, resource, f"Wellness music album: {album['title']} (3 MP3 tracks)"
+        ),
         "verify_session_url": f"{BASE_URL}/verify-session",
         "audio_loaded": {t: audio_path(t).exists() for t in album["track_ids"]},
         "entitlement": "One album payment entitles the buyer to all 3 tracks. Pay once, then present the issued X-LGDA-Session token to /stream for each track.",
@@ -467,7 +555,8 @@ def album_purchase(album_id: str, session_id: str) -> dict:
 # ---------------------------------------------------------------- stream (paywalled)
 
 def _stream(track_id: str, session_id: str, album_id: Optional[str],
-            x_payment: Optional[str], x_session: Optional[str]):
+            x_payment: Optional[str], payment_signature: Optional[str],
+            x_session: Optional[str]):
     track = track_or_404(track_id)
     if album_id:
         album = album_or_404(album_id)
@@ -497,14 +586,31 @@ def _stream(track_id: str, session_id: str, album_id: Optional[str],
             price, resource = TRACK_PRICE_ATOMIC, f"{BASE_URL}/stream?track_id={track_id}&session_id={session_id}"
             desc = f"Wellness music track: {track['title']} (MP3)"
             grant = [track_id]
-        if not x_payment:
+        # v2 clients send PAYMENT-SIGNATURE; v1 clients send X-PAYMENT.
+        # Either is accepted (dual-serve); v2 takes precedence if both
+        # are present.
+        payment_header = payment_signature or x_payment
+        if not payment_header:
             return x402_402(price, resource, desc)
-        requirements = x402_accepts(price, resource, desc)
-        settled = verify_and_settle_payment(x_payment, requirements)
+        settled = verify_and_settle_payment(payment_header, price, resource, desc)
         payment_tx = settled.get("transaction") or settled.get("txHash")
         token = issue_session_token(session_id, grant, payment_tx)
         response = FileResponse(path, media_type="audio/mpeg", filename=f"{track_id}.mp3")
         response.headers["X-LGDA-Session"] = token
+        # Settlement receipt in both dialects (base64 JSON), so v1 and
+        # v2 clients can both read the result.
+        settle_response = {
+            "success": True,
+            "transaction": payment_tx or "",
+            "network": caip2_network(X402_NETWORK),
+            "payer": settled.get("payer") or "",
+        }
+        response.headers["PAYMENT-RESPONSE"] = _b64(
+            json.dumps(settle_response, separators=(",", ":")).encode()
+        )
+        response.headers["X-PAYMENT-RESPONSE"] = _b64(
+            json.dumps(settled, separators=(",", ":")).encode()
+        )
         return response
 
     return FileResponse(path, media_type="audio/mpeg", filename=f"{track_id}.mp3")
@@ -513,15 +619,17 @@ def _stream(track_id: str, session_id: str, album_id: Optional[str],
 @app.get("/stream", tags=["stream"])
 def stream_get(track_id: str, session_id: str, album_id: Optional[str] = None,
                x_payment: Optional[str] = Header(default=None, alias="X-PAYMENT"),
+               payment_signature: Optional[str] = Header(default=None, alias="PAYMENT-SIGNATURE"),
                x_session: Optional[str] = Header(default=None, alias="X-LGDA-Session")):
-    return _stream(track_id, session_id, album_id, x_payment, x_session)
+    return _stream(track_id, session_id, album_id, x_payment, payment_signature, x_session)
 
 
 @app.post("/stream", tags=["stream"])
 def stream_post(track_id: str, session_id: str, album_id: Optional[str] = None,
                 x_payment: Optional[str] = Header(default=None, alias="X-PAYMENT"),
+                payment_signature: Optional[str] = Header(default=None, alias="PAYMENT-SIGNATURE"),
                 x_session: Optional[str] = Header(default=None, alias="X-LGDA-Session")):
-    return _stream(track_id, session_id, album_id, x_payment, x_session)
+    return _stream(track_id, session_id, album_id, x_payment, payment_signature, x_session)
 
 # ---------------------------------------------------------------- stripe stub
 
@@ -593,7 +701,7 @@ def build_receipt(req: VerifySessionRequest) -> dict:
         track_ids = list(ALBUMS[req.album_id]["track_ids"])
     receipt = {
         "node": "lgda-autonomic-node",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "session_id": req.session_id,
         "agent_id": req.agent_id,
         "track_ids": track_ids,
@@ -650,7 +758,7 @@ TOOLS = [
     {
         "name": "purchase_track",
         "title": "Purchase one wellness music track",
-        "description": "Purchase a single track ($5.99 USDC via x402). Returns the stream URL and x402 payment requirements; GET the URL with an X-PAYMENT header to receive the MP3 and an X-LGDA-Session token, then POST telemetry to /verify-session for a signed receipt.",
+        "description": "Purchase a single track ($5.99 USDC via x402 v2 or v1). Returns the stream URL and x402 payment requirements; GET the URL with a PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1) header to receive the MP3 and an X-LGDA-Session token, then POST telemetry to /verify-session for a signed receipt.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -665,7 +773,7 @@ TOOLS = [
     {
         "name": "purchase_album",
         "title": "Purchase a wellness music album (3 tracks)",
-        "description": "Purchase a whole album ($14.99 USDC via x402). One payment entitles the buyer to all 3 tracks on the album. Returns stream URLs and x402 payment requirements; pay once, then present the issued X-LGDA-Session token to /stream for each track.",
+        "description": "Purchase a whole album ($14.99 USDC via x402 v2 or v1). One payment entitles the buyer to all 3 tracks on the album. Returns stream URLs and x402 payment requirements; pay once, then present the issued X-LGDA-Session token to /stream for each track.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -704,7 +812,7 @@ def manifest() -> dict:
         "schema_version": "lgda-mcp-manifest/1",
         "name": "lgda-autonomic-node",
         "title": "LGDA Autonomic Pacing Node",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "description": (
             "Stateless M2M node: x402-paid wellness music (27 tracks, "
             "9 albums) + signed HRV session receipts. The music is the "
@@ -718,7 +826,7 @@ def manifest() -> dict:
         "tools": TOOLS,
         "pricing": {
             "protocol": "x402",
-            "x402Version": 1,
+            "x402Versions": [1, 2],
             "scheme": "exact",
             "tracks": {"price_usdc": "5.99", "amount_atomic": str(TRACK_PRICE_ATOMIC), "unit": "per track"},
             "albums": {"price_usdc": "14.99", "amount_atomic": str(ALBUM_PRICE_ATOMIC), "unit": "per album (3 tracks)"},
@@ -726,6 +834,10 @@ def manifest() -> dict:
             "accepts": [
                 x402_accepts(TRACK_PRICE_ATOMIC, f"{BASE_URL}/stream", "Wellness music track (MP3)"),
                 x402_accepts(ALBUM_PRICE_ATOMIC, f"{BASE_URL}/stream", "Wellness music album, 3 tracks (MP3)"),
+            ],
+            "accepts_v2": [
+                x402_accepts_v2(TRACK_PRICE_ATOMIC),
+                x402_accepts_v2(ALBUM_PRICE_ATOMIC),
             ],
             "facilitator": X402_FACILITATOR_URL,
             "stripe": {"enabled": False},
@@ -781,7 +893,7 @@ async def mcp_rpc(request: Request):
         return _rpc_result(req_id, {
             "protocolVersion": "2025-06-18",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "lgda-autonomic-node", "version": "2.0.0"},
+            "serverInfo": {"name": "lgda-autonomic-node", "version": "2.1.0"},
         })
     if method == "ping":
         return _rpc_result(req_id, {})

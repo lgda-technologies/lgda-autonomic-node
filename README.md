@@ -82,9 +82,22 @@ rows shown — the header figures are recorded verbatim in
 3. `tools/call purchase_track` (`track_id`, `session_id`) or
    `purchase_album` (`album_id`, `session_id`) — stream URL(s) + x402
    payment requirements.
-4. `GET /stream?track_id=...&session_id=...` with `X-PAYMENT` —
-   receives the MP3 and an `X-LGDA-Session` token.
+4. `GET /stream?track_id=...&session_id=...` with `PAYMENT-SIGNATURE`
+   (x402 v2) or `X-PAYMENT` (v1) — receives the MP3 and an
+   `X-LGDA-Session` token, plus a `PAYMENT-RESPONSE` /
+   `X-PAYMENT-RESPONSE` settlement header.
 5. `POST /verify-session` with pre/post HRV segments — signed receipt.
+
+### x402 versions (dual-serve, v2.1.0)
+
+The node speaks x402 v1 **and** v2. The 402 carries the canonical v2
+`PaymentRequired` object in the `PAYMENT-REQUIRED` header (base64 JSON:
+CAIP-2 network `eip155:8453`/`eip155:84532`, `amount`, `resource`
+object) and the v1 object in the body (`maxAmountRequired`, plain
+network name). Payments are accepted on either header; the EIP-3009
+authorization is identical in both versions and the facilitator
+accepts both. v2 is required by x402scan and by the x402 Bazaar
+discovery index; v1 is kept so existing clients keep working.
 
 ### Entitlement model
 
@@ -107,7 +120,7 @@ rows shown — the header figures are recorded verbatim in
 | `GET /catalog` | Full catalog + evidence |
 | `GET /catalog/{track_id}` | One track + its sessions |
 | `GET /albums`, `GET /albums/{album_id}` | Album browsing |
-| `GET /mcp` | MCP manifest (v2.0.0, 5 tools) |
+| `GET /mcp` | MCP manifest (v2.1.0, 5 tools) |
 | `POST /mcp` | JSON-RPC: `initialize`, `ping`, `tools/list`, `tools/call` |
 | `GET\|POST /stream` | x402-paywalled MP3 (see above) |
 | `POST /verify-session` | Signed HRV receipt (v1-compatible shape + optional `track_id`/`album_id`) |

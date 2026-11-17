@@ -23,7 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app.main import app, issue_session_token  # noqa: E402
+from app.main import app, issue_session_token
+import app.main as main_module  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 CATALOG = json.loads((ROOT / "catalog.json").read_text())
@@ -64,7 +65,7 @@ def test_manifest_tools_exist():
     m = r.json()
     assert m["schema_version"] == "lgda-mcp-manifest/1"
     assert m["name"] == "lgda-autonomic-node"
-    assert m["version"] == "2.0.0"
+    assert m["version"] == "2.1.0"
     names = {t["name"] for t in m["tools"]}
     assert names == {
         "list_catalog",
@@ -128,7 +129,8 @@ def test_healthz():
     r = client.get("/healthz")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
-    assert r.json()["version"] == "2.0.0"
+    assert r.json()["version"] == "2.1.0"
+    assert r.json()["x402_versions"] == [1, 2]
     assert r.json()["tracks"] == 27
     assert r.json()["audio_files_loaded"] == 0  # test audio dir is empty
 
@@ -229,3 +231,149 @@ def test_wording_never_clinical():
         assert "clinically calibrated" not in body, url
         assert "diagnose" not in body, url
     assert "wellness music" in client.get("/mcp").text.lower()
+
+
+def test_402_dual_serve_v1_body_v2_header():
+    """Unpaid /stream returns the v1 object in the body AND the
+    canonical v2 PaymentRequired in the PAYMENT-REQUIRED header."""
+    audio = TMP / "audio" / "midnight.mp3"
+    audio.write_bytes(b"ID3fake-mp3-bytes")
+    try:
+        r = client.get("/stream", params={"track_id": "midnight", "session_id": "t1"})
+        assert r.status_code == 402
+        # v1 body (unchanged).
+        body = r.json()
+        assert body["x402Version"] == 1
+        assert body["accepts"][0]["maxAmountRequired"] == "5990000"
+        assert body["accepts"][0]["network"] == "base-sepolia"
+        # v2 header.
+        assert "payment-required" in r.headers
+        v2 = json.loads(base64.b64decode(r.headers["payment-required"]))
+        assert v2["x402Version"] == 2
+        assert v2["error"] == "PAYMENT-SIGNATURE header is required"
+        assert v2["resource"]["mimeType"] == "audio/mpeg"
+        assert v2["resource"]["serviceName"] == "LGDA Music"
+        assert v2["resource"]["iconUrl"].endswith("/favicon.ico")
+        acc = v2["accepts"][0]
+        assert acc["scheme"] == "exact"
+        assert acc["network"] == "eip155:84532"  # CAIP-2, not "base-sepolia"
+        assert acc["amount"] == "5990000"  # v2 field name
+        assert "maxAmountRequired" not in acc
+        assert acc["asset"] == "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+        assert acc["payTo"] == "0x8da12fca05e38aeda66f112fcf2ef6036c7bd666"
+        assert acc["extra"] == {"name": "USDC", "version": "2"}
+    finally:
+        audio.unlink(missing_ok=True)
+
+
+def test_favicon_and_openapi_contact():
+    r = client.get("/favicon.ico")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/png")
+    assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
+    spec = client.get("/openapi.json").json()
+    assert spec["info"]["contact"]["email"] == "solheefinery@gmail.com"
+
+
+def _fake_facilitator(calls, version):
+    """Stand-in for _facilitator_post: records calls, always approves."""
+    def fake(path, payload):
+        calls.append((path, payload))
+        assert payload["x402Version"] == version
+        if path == "/verify":
+            return {"isValid": True, "payer": "0xbuyer"}
+        return {"success": True, "transaction": "0xfake-tx", "network": payload["paymentRequirements"]["network"], "payer": "0xbuyer"}
+    return fake
+
+
+def test_v2_payment_accepted(monkeypatch):
+    """A v2 PAYMENT-SIGNATURE payment settles (mocked facilitator) and
+    the server returns both settlement headers + a session token."""
+    audio = TMP / "audio" / "midnight.mp3"
+    audio.write_bytes(b"ID3fake-mp3-bytes")
+    calls = []
+    monkeypatch.setattr(main_module, "_facilitator_post", _fake_facilitator(calls, 2))
+    try:
+        r402 = client.get("/stream", params={"track_id": "midnight", "session_id": "t1"})
+        v2 = json.loads(base64.b64decode(r402.headers["payment-required"]))
+        payload = {
+            "x402Version": 2,
+            "resource": v2["resource"],
+            "accepted": v2["accepts"][0],
+            "payload": {
+                "signature": "0x" + "ab" * 65,
+                "authorization": {
+                    "from": "0xbuyer", "to": "0x8da12fca05e38aeda66f112fcf2ef6036c7bd666",
+                    "value": "5990000", "validAfter": "1", "validBefore": "9999999999",
+                    "nonce": "0x" + "cd" * 32,
+                },
+            },
+        }
+        header = base64.b64encode(json.dumps(payload).encode()).decode()
+        r = client.get("/stream", params={"track_id": "midnight", "session_id": "t1"},
+                       headers={"PAYMENT-SIGNATURE": header})
+        assert r.status_code == 200
+        assert r.content == b"ID3fake-mp3-bytes"
+        assert "x-lgda-session" in r.headers
+        # Both settlement headers are present and decode.
+        resp = json.loads(base64.b64decode(r.headers["payment-response"]))
+        assert resp["success"] is True
+        assert resp["transaction"] == "0xfake-tx"
+        assert resp["network"] == "eip155:84532"
+        assert resp["payer"] == "0xbuyer"
+        assert json.loads(base64.b64decode(r.headers["x-payment-response"]))["success"] is True
+        # The facilitator saw v2-shaped requirements.
+        assert [p for p, _ in calls] == ["/verify", "/settle"]
+        reqs = calls[0][1]["paymentRequirements"]
+        assert reqs["network"] == "eip155:84532"
+        assert reqs["amount"] == "5990000"
+        assert calls[0][1]["paymentPayload"]["accepted"] == v2["accepts"][0]
+    finally:
+        audio.unlink(missing_ok=True)
+
+
+def test_v1_payment_still_accepted(monkeypatch):
+    """Dual-serve regression: an old v1 X-PAYMENT payment still works."""
+    audio = TMP / "audio" / "midnight.mp3"
+    audio.write_bytes(b"ID3fake-mp3-bytes")
+    calls = []
+    monkeypatch.setattr(main_module, "_facilitator_post", _fake_facilitator(calls, 1))
+    try:
+        r402 = client.get("/stream", params={"track_id": "midnight", "session_id": "t1"})
+        v1req = r402.json()["accepts"][0]
+        payload = {
+            "x402Version": 1,
+            "scheme": "exact",
+            "network": "base-sepolia",
+            "payload": {
+                "signature": "0x" + "ab" * 65,
+                "authorization": {
+                    "from": "0xbuyer", "to": "0x8da12fca05e38aeda66f112fcf2ef6036c7bd666",
+                    "value": "5990000", "validAfter": "1", "validBefore": "9999999999",
+                    "nonce": "0x" + "cd" * 32,
+                },
+            },
+        }
+        header = base64.b64encode(json.dumps(payload).encode()).decode()
+        r = client.get("/stream", params={"track_id": "midnight", "session_id": "t1"},
+                       headers={"X-PAYMENT": header})
+        assert r.status_code == 200
+        assert r.content == b"ID3fake-mp3-bytes"
+        reqs = calls[0][1]["paymentRequirements"]
+        assert reqs["network"] == "base-sepolia"
+        assert reqs["maxAmountRequired"] == "5990000"
+        assert reqs == v1req
+    finally:
+        audio.unlink(missing_ok=True)
+
+
+def test_mcp_purchase_helpers_expose_v2():
+    r = client.post("/mcp", json={
+        "jsonrpc": "2.0", "id": 9, "method": "tools/call",
+        "params": {"name": "purchase_track", "arguments": {"track_id": "midnight", "session_id": "s1"}},
+    })
+    purchase = json.loads(r.json()["result"]["content"][0]["text"])
+    assert purchase["x402"]["x402Version"] == 1
+    assert purchase["x402_v2"]["x402Version"] == 2
+    assert purchase["x402_v2"]["accepts"][0]["network"] == "eip155:84532"
+    assert purchase["x402_v2"]["accepts"][0]["amount"] == "5990000"
