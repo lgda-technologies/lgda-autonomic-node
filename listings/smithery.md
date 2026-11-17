@@ -1,8 +1,23 @@
 # Smithery — draft listing
 
-**Status: DRAFT — submit only after v2 is deployed and the audio files are loaded.**
-Smithery: https://smithery.ai (MCP server directory; listing via a
-`smithery.yaml` in the server repo + registry submission).
+**Status: CLOSED — Smithery shut down submissions on October 31, 2026.**
+Verified 2026-11-17 from Smithery's own announcement
+(https://www.smithery.ai/future): "On October 31, 2026, we're shutting
+down Smithery's connection management services." What stopped working:
+Smithery accounts and API keys, the Smithery API, Connect, Toolbox, and
+the CLI and SDKs. https://smithery.ai/new returns "Not found" and the
+site has no sign-in and no publishing flow. Smithery remains only as a
+public directory of MCP servers, now powered by Arcade.dev, holding "a
+curated set of verified servers" — with no published route for new
+servers to join. (This also explains the CLI auth failure: the auth
+endpoint https://smithery.ai/api/auth/cli/session returns 404.) The
+only route the site offers is contacting cofounder Anirudh Kamath at
+ani [at] smithery [dot] ai. Arcade.dev is not a substitute public
+listing: registering a remote server there scopes it to your own
+project/org; its public catalog entries are Arcade-verified, not
+self-serve. Note: smithery.yaml stays in the repo (harmless), and the
+official MCP Registry listing feeds directories that import from it
+(Glama, API Tracker, PulseMCP).
 
 ## Listing
 
