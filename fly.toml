@@ -1,0 +1,31 @@
+app = "lgda-music"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+# Secrets (set with `fly secrets set ...`, never in this file):
+#   PAY_TO_ADDRESS        — owner-confirmed wallet for x402 payments
+#   X402_NETWORK          — "base-sepolia" (dev) or "base" (mainnet)
+#   RECEIPT_PRIVATE_KEY_B64 — base64 Ed25519 seed, so the receipt key
+#                             survives redeploys (else a new key is
+#                             generated per machine and receipts from
+#                             earlier deploys stop verifying)
+#   BASE_URL              — https://lgda-music.fly.dev
+#   STRIPE_SECRET_KEY     — only when Stripe checkout is implemented
+[env]
+  BASE_URL = "https://lgda-music.fly.dev"
+  X402_NETWORK = "base"

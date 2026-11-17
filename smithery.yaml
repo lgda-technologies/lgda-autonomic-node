@@ -1,0 +1,5 @@
+# Smithery configuration for the LGDA node (remote, streamable HTTP).
+# See https://smithery.ai/docs for the current schema at submission time.
+startCommand:
+  type: http
+  url: "https://lgda-music.fly.dev/mcp"

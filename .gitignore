@@ -1,0 +1,16 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+# Receipt signing private key — NEVER commit.
+data/
+.receipt_key.json
+# Hand-built OCI image staging + layer cache (contains the audio layer).
+# NEVER commit — app-layer.tar.gz bundles all 27 MP3s.
+.oci/
+
+# The audio files are the product; they are large and rights-managed.
+# Deploy them via a volume or a private build step, not git.
+audio/*.mp3
+audio/*.wav
+!audio/.gitkeep

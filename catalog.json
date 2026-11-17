@@ -1,0 +1,696 @@
+{
+  "name": "LGDA Technologies \u2014 Wellness Music Catalog",
+  "version": "2.0.0",
+  "source": "https://lgda-technologies.base44.app/vault",
+  "verified": "2026-11-17",
+  "catalog_note": "From Darkness Came Dust updated 2026-11-17 by the owner: Won't Shake, Out The Window, The Antidote (exported from the owner's Untitled project). The previous three tracks (I Am Alive, T.R.U.U.P.S., Tonight We Dance) had no audio file in the app and will return later as From Darkness Came Dust Vol. Two.",
+  "currency": "USD",
+  "track_price_usd": 5.99,
+  "track_price_usdc_atomic": 5990000,
+  "album_price_usd": 14.99,
+  "album_price_usdc_atomic": 14990000,
+  "price_note": "Album $14.99 saves $2.98 vs its 3 tracks separately (3 x $5.99 = $17.97). Agent price set by owner 2026-11-17 for cleaner buying; Base44 Vault still lists the album at $31.99.",
+  "disclaimer": "Wellness music. Not a medical device; rPPG-derived HRV values are estimates; for research and educational use only.",
+  "albums": [
+    {
+      "album_id": "black-foot-ronin-vol-two",
+      "title": "Black Foot Ronin Vol. Two",
+      "track_ids": [
+        "midnight",
+        "the-southside",
+        "innocence"
+      ],
+      "track_count": 3,
+      "price_usd": 14.99,
+      "price_usdc_atomic": 14990000
+    },
+    {
+      "album_id": "black-foot-ronin",
+      "title": "Black Foot Ronin",
+      "track_ids": [
+        "noir",
+        "done-told-y-all",
+        "i-did-it"
+      ],
+      "track_count": 3,
+      "price_usd": 14.99,
+      "price_usdc_atomic": 14990000
+    },
+    {
+      "album_id": "in-the-desert",
+      "title": "In The Desert",
+      "track_ids": [
+        "tokyo",
+        "yellow-italy",
+        "31-wings"
+      ],
+      "track_count": 3,
+      "price_usd": 14.99,
+      "price_usdc_atomic": 14990000
+    },
+    {
+      "album_id": "75-maryvale-s",
+      "title": "75 Maryvale's",
+      "track_ids": [
+        "grand-entrance",
+        "stone-mountain",
+        "osoeastlakepark"
+      ],
+      "track_count": 3,
+      "price_usd": 14.99,
+      "price_usdc_atomic": 14990000
+    },
+    {
+      "album_id": "porter-ave",
+      "title": "Porter Ave",
+      "track_ids": [
+        "blue-beamer",
+        "higher-ground",
+        "tripper"
+      ],
+      "track_count": 3,
+      "price_usd": 14.99,
+      "price_usdc_atomic": 14990000
+    },
+    {
+      "album_id": "from-darkness-came-dust",
+      "title": "From Darkness Came Dust",
+      "track_ids": [
+        "wont-shake",
+        "out-the-window",
+        "the-antidote"
+      ],
+      "track_count": 3,
+      "price_usd": 14.99,
+      "price_usdc_atomic": 14990000
+    },
+    {
+      "album_id": "the-golden-child",
+      "title": "The Golden Child",
+      "track_ids": [
+        "the-golden-child",
+        "been-with-us",
+        "no-conversation"
+      ],
+      "track_count": 3,
+      "price_usd": 14.99,
+      "price_usdc_atomic": 14990000
+    },
+    {
+      "album_id": "bungaloo-blue",
+      "title": "Bungaloo Blue",
+      "track_ids": [
+        "black-summer",
+        "who",
+        "red-light"
+      ],
+      "track_count": 3,
+      "price_usd": 14.99,
+      "price_usdc_atomic": 14990000
+    },
+    {
+      "album_id": "bungaloo-blue-vol-two",
+      "title": "Bungaloo Blue Vol. Two",
+      "track_ids": [
+        "one-of-us",
+        "toothpick",
+        "pay-off"
+      ],
+      "track_count": 3,
+      "price_usd": 14.99,
+      "price_usdc_atomic": 14990000
+    }
+  ],
+  "tracks": [
+    {
+      "track_id": "midnight",
+      "title": "Midnight",
+      "album_id": "black-foot-ronin-vol-two",
+      "album": "Black Foot Ronin Vol. Two",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/midnight.mp3",
+      "evidence": {
+        "session_count": 8,
+        "valid_sessions": 4,
+        "mean_rmssd_ms": 140.5,
+        "median_rmssd_ms": 77.8,
+        "min_rmssd_ms": 67.7,
+        "max_rmssd_ms": 338.7,
+        "mean_heart_rate_bpm": 93.2,
+        "sessions": [
+          "history-02",
+          "history-03",
+          "history-07",
+          "history-08"
+        ]
+      }
+    },
+    {
+      "track_id": "the-southside",
+      "title": "The Southside",
+      "album_id": "black-foot-ronin-vol-two",
+      "album": "Black Foot Ronin Vol. Two",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/the-southside.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "innocence",
+      "title": "Innocence",
+      "album_id": "black-foot-ronin-vol-two",
+      "album": "Black Foot Ronin Vol. Two",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/innocence.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "noir",
+      "title": "Noir",
+      "album_id": "black-foot-ronin",
+      "album": "Black Foot Ronin",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/noir.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "done-told-y-all",
+      "title": "Done Told Y'all",
+      "album_id": "black-foot-ronin",
+      "album": "Black Foot Ronin",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/done-told-y-all.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "i-did-it",
+      "title": "I Did It",
+      "album_id": "black-foot-ronin",
+      "album": "Black Foot Ronin",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/i-did-it.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "tokyo",
+      "title": "Tokyo",
+      "album_id": "in-the-desert",
+      "album": "In The Desert",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/tokyo.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "yellow-italy",
+      "title": "Yellow Italy",
+      "album_id": "in-the-desert",
+      "album": "In The Desert",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/yellow-italy.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "31-wings",
+      "title": "31 Wings",
+      "album_id": "in-the-desert",
+      "album": "In The Desert",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/31-wings.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "grand-entrance",
+      "title": "Grand Entrance",
+      "album_id": "75-maryvale-s",
+      "album": "75 Maryvale's",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/grand-entrance.mp3",
+      "evidence": {
+        "session_count": 3,
+        "valid_sessions": 3,
+        "mean_rmssd_ms": 313.1,
+        "median_rmssd_ms": 244.5,
+        "min_rmssd_ms": 212.2,
+        "max_rmssd_ms": 482.6,
+        "mean_heart_rate_bpm": 63.3,
+        "sessions": [
+          "history-13",
+          "history-14",
+          "history-15"
+        ]
+      }
+    },
+    {
+      "track_id": "stone-mountain",
+      "title": "Stone Mountain",
+      "album_id": "75-maryvale-s",
+      "album": "75 Maryvale's",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/stone-mountain.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "osoeastlakepark",
+      "title": "OsoEastLakePark",
+      "album_id": "75-maryvale-s",
+      "album": "75 Maryvale's",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/osoeastlakepark.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "blue-beamer",
+      "title": "BLUE BEAMER",
+      "album_id": "porter-ave",
+      "album": "Porter Ave",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/blue-beamer.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "higher-ground",
+      "title": "HIGHER GROUND",
+      "album_id": "porter-ave",
+      "album": "Porter Ave",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/higher-ground.mp3",
+      "evidence": {
+        "session_count": 9,
+        "valid_sessions": 9,
+        "mean_rmssd_ms": 520.8,
+        "median_rmssd_ms": 492.0,
+        "min_rmssd_ms": 105.3,
+        "max_rmssd_ms": 965.1,
+        "mean_heart_rate_bpm": 77.4,
+        "sessions": [
+          "history-20",
+          "history-21",
+          "history-22",
+          "history-23",
+          "history-24",
+          "history-25",
+          "history-26",
+          "history-27",
+          "history-28"
+        ]
+      }
+    },
+    {
+      "track_id": "tripper",
+      "title": "TRIPPER",
+      "album_id": "porter-ave",
+      "album": "Porter Ave",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/tripper.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "wont-shake",
+      "title": "Won't Shake",
+      "album_id": "from-darkness-came-dust",
+      "album": "From Darkness Came Dust",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/wont-shake.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "out-the-window",
+      "title": "Out The Window",
+      "album_id": "from-darkness-came-dust",
+      "album": "From Darkness Came Dust",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/out-the-window.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "the-antidote",
+      "title": "The Antidote",
+      "album_id": "from-darkness-came-dust",
+      "album": "From Darkness Came Dust",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/the-antidote.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "the-golden-child",
+      "title": "The Golden Child",
+      "album_id": "the-golden-child",
+      "album": "The Golden Child",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/the-golden-child.mp3",
+      "evidence": {
+        "session_count": 6,
+        "valid_sessions": 6,
+        "mean_rmssd_ms": 429.8,
+        "median_rmssd_ms": 391.3,
+        "min_rmssd_ms": 138.2,
+        "max_rmssd_ms": 886.7,
+        "mean_heart_rate_bpm": 70,
+        "sessions": [
+          "history-09",
+          "history-10",
+          "history-11",
+          "history-12",
+          "history-16",
+          "history-19"
+        ]
+      }
+    },
+    {
+      "track_id": "been-with-us",
+      "title": "Been With Us",
+      "album_id": "the-golden-child",
+      "album": "The Golden Child",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/been-with-us.mp3",
+      "evidence": {
+        "session_count": 1,
+        "valid_sessions": 1,
+        "mean_rmssd_ms": 371.7,
+        "median_rmssd_ms": 371.7,
+        "min_rmssd_ms": 371.7,
+        "max_rmssd_ms": 371.7,
+        "mean_heart_rate_bpm": 79,
+        "sessions": [
+          "history-17"
+        ]
+      }
+    },
+    {
+      "track_id": "no-conversation",
+      "title": "No Conversation",
+      "album_id": "the-golden-child",
+      "album": "The Golden Child",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/no-conversation.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "black-summer",
+      "title": "Black Summer",
+      "album_id": "bungaloo-blue",
+      "album": "Bungaloo Blue",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/black-summer.mp3",
+      "evidence": {
+        "session_count": 1,
+        "valid_sessions": 1,
+        "mean_rmssd_ms": 391.7,
+        "median_rmssd_ms": 391.7,
+        "min_rmssd_ms": 391.7,
+        "max_rmssd_ms": 391.7,
+        "mean_heart_rate_bpm": 82,
+        "sessions": [
+          "history-18"
+        ]
+      }
+    },
+    {
+      "track_id": "who",
+      "title": "Who?",
+      "album_id": "bungaloo-blue",
+      "album": "Bungaloo Blue",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/who.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "red-light",
+      "title": "Red Light",
+      "album_id": "bungaloo-blue",
+      "album": "Bungaloo Blue",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/red-light.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "one-of-us",
+      "title": "One Of Us",
+      "album_id": "bungaloo-blue-vol-two",
+      "album": "Bungaloo Blue Vol. Two",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/one-of-us.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "toothpick",
+      "title": "Toothpick",
+      "album_id": "bungaloo-blue-vol-two",
+      "album": "Bungaloo Blue Vol. Two",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/toothpick.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    },
+    {
+      "track_id": "pay-off",
+      "title": "Pay Off",
+      "album_id": "bungaloo-blue-vol-two",
+      "album": "Bungaloo Blue Vol. Two",
+      "price_usd": 5.99,
+      "price_usdc_atomic": 5990000,
+      "format": "MP3 stream",
+      "audio_file": "audio/pay-off.mp3",
+      "evidence": {
+        "session_count": 0,
+        "valid_sessions": 0,
+        "mean_rmssd_ms": null,
+        "median_rmssd_ms": null,
+        "min_rmssd_ms": null,
+        "max_rmssd_ms": null,
+        "mean_heart_rate_bpm": null,
+        "sessions": []
+      }
+    }
+  ]
+}
