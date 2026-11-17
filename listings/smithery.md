@@ -12,7 +12,7 @@ Smithery: https://smithery.ai (MCP server directory; listing via a
 - **Description:** Buy LGDA Technologies wellness music with USDC — 27 tracks, 9 albums, delivered as MP3, with signed HRV session receipts. Agents pay per track ($5.99) or album ($14.99) via x402. Each track includes its History session evidence (RMSSD / heart rate).
 - **Transport:** Streamable HTTP (remote server — no local install)
 - **URL:** https://lgda-music.fly.dev/mcp
-- **Repository:** (add GitHub URL once pushed)
+- **Repository:** https://github.com/lgda-technologies/lgda-autonomic-node
 
 ## Tools
 
@@ -48,5 +48,5 @@ x402 (USDC): $5.99 per track, $14.99 per album (3 tracks). Network
 ## Submission checklist
 
 - [x] v2 deployed, `/healthz` reports `audio_files_loaded: 27` (verified live 2026-11-17: 27 loaded, 0 missing; FDCD = Won't Shake, Out The Window, The Antidote)
-- [ ] Code in a public GitHub repo with `smithery.yaml`
+- [x] Code in a public GitHub repo with `smithery.yaml` — https://github.com/lgda-technologies/lgda-autonomic-node
 - [x] Owner confirmed the payment wallet; mainnet vs testnet decided (mainnet, live 2026-11-17)

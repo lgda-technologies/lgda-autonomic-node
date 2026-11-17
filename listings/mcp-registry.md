@@ -10,7 +10,7 @@ Registry: https://registry.modelcontextprotocol.io (publish via `mcp-publisher` 
 - **Title:** LGDA Autonomic Pacing Node
 - **Version:** 2.0.0
 - **Description:** Stateless machine-to-machine node selling LGDA Technologies wellness music to AI agents: 27 tracks across 9 albums, paid per track ($5.99) or album ($14.99) in USDC via x402, delivered as MP3, with signed HRV session receipts. Each track carries its History session evidence (RMSSD / heart rate).
-- **Repository:** (add GitHub URL once pushed)
+- **Repository:** https://github.com/lgda-technologies/lgda-autonomic-node
 - **Transport:** Streamable HTTP — `https://lgda-music.fly.dev/mcp`
 - **Protocol versions:** 2025-06-18, 2025-03-26, 2024-11-05
 
@@ -49,6 +49,6 @@ Registry: https://registry.modelcontextprotocol.io (publish via `mcp-publisher` 
 ## Submission checklist
 
 - [x] v2 deployed to https://lgda-music.fly.dev, `/healthz` reports `audio_files_loaded: 27` (verified live 2026-11-17: 27 loaded, 0 missing; FDCD = Won't Shake, Out The Window, The Antidote)
-- [ ] Code pushed to a public GitHub repo (registry requires it)
+- [x] Code pushed to a public GitHub repo (registry requires it) — https://github.com/lgda-technologies/lgda-autonomic-node
 - [x] Owner confirmed the payment wallet (mainnet, live 2026-11-17)
 - [x] `GET /mcp` returns the v2 manifest (version 2.0.0, 5 tools)

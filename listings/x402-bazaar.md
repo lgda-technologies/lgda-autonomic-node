@@ -11,6 +11,7 @@ Bazaar: https://www.x402bazaar.com (x402 ecosystem directory for paid services).
 - **URL:** https://lgda-music.fly.dev
 - **MCP endpoint:** https://lgda-music.fly.dev/mcp
 - **Docs:** https://lgda-music.fly.dev/docs
+- **Repository:** https://github.com/lgda-technologies/lgda-autonomic-node
 
 ## Description
 
