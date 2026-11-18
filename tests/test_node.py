@@ -65,7 +65,7 @@ def test_manifest_tools_exist():
     m = r.json()
     assert m["schema_version"] == "lgda-mcp-manifest/1"
     assert m["name"] == "lgda-autonomic-node"
-    assert m["version"] == "2.1.0"
+    assert m["version"] == "2.2.0"
     names = {t["name"] for t in m["tools"]}
     assert names == {
         "list_catalog",
@@ -129,7 +129,7 @@ def test_healthz():
     r = client.get("/healthz")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
-    assert r.json()["version"] == "2.1.0"
+    assert r.json()["version"] == "2.2.0"
     assert r.json()["x402_versions"] == [1, 2]
     assert r.json()["tracks"] == 27
     assert r.json()["audio_files_loaded"] == 0  # test audio dir is empty
@@ -377,3 +377,48 @@ def test_mcp_purchase_helpers_expose_v2():
     assert purchase["x402_v2"]["x402Version"] == 2
     assert purchase["x402_v2"]["accepts"][0]["network"] == "eip155:84532"
     assert purchase["x402_v2"]["accepts"][0]["amount"] == "5990000"
+
+
+def test_bazaar_extension_in_v2_402():
+    """The v2 402 carries the `bazaar` discovery extension and its
+    `info` validates against its own bundled schema (what a
+    facilitator does before cataloging)."""
+    import jsonschema
+
+    audio = TMP / "audio" / "midnight.mp3"
+    audio.write_bytes(b"ID3fake-mp3-bytes")
+    try:
+        r = client.get("/stream", params={"track_id": "midnight", "session_id": "t1"})
+        assert r.status_code == 402
+        v2 = json.loads(base64.b64decode(r.headers["payment-required"]))
+        baz = v2["extensions"]["bazaar"]
+        assert baz["info"]["input"]["type"] == "http"
+        assert baz["info"]["input"]["method"] == "GET"
+        assert baz["info"]["input"]["queryParams"] == {
+            "track_id": "midnight", "session_id": "t1"}
+        assert baz["info"]["output"]["type"] == "binary"
+        assert baz["info"]["output"]["format"] == "audio/mpeg"
+        jsonschema.validate(instance=baz["info"], schema=baz["schema"])
+    finally:
+        audio.unlink(missing_ok=True)
+
+
+def test_bazaar_extension_album_402():
+    """An album 402 declares album_id (not track_id) in the bazaar
+    queryParams, and the info still validates against its schema."""
+    import jsonschema
+
+    audio = TMP / "audio" / "midnight.mp3"
+    audio.write_bytes(b"ID3fake-mp3-bytes")
+    try:
+        r = client.get("/stream", params={
+            "track_id": "midnight", "session_id": "t2",
+            "album_id": "black-foot-ronin-vol-two"})
+        assert r.status_code == 402
+        v2 = json.loads(base64.b64decode(r.headers["payment-required"]))
+        baz = v2["extensions"]["bazaar"]
+        assert baz["info"]["input"]["queryParams"] == {
+            "album_id": "black-foot-ronin-vol-two", "session_id": "t2"}
+        jsonschema.validate(instance=baz["info"], schema=baz["schema"])
+    finally:
+        audio.unlink(missing_ok=True)

@@ -1,5 +1,5 @@
 """
-LGDA Autonomic Pacing Node — v2.1.0.
+LGDA Autonomic Pacing Node — v2.2.0.
 
 What this is: a machine-readable front door for LGDA Technologies'
 wellness music catalog (https://lgda-technologies.base44.app).
@@ -19,6 +19,9 @@ What changed from v1 (see README.md for the full list):
   and the v1 object in the body; payments are accepted on either the
   PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1) header. The EIP-3009
   authorization itself is identical in both versions.
+- v2.2.0 adds the x402 `bazaar` discovery extension to the v2 402,
+  so facilitators can catalog the /stream endpoint (HTTP method,
+  query params, MP3 output) in a discovery index.
 
 Wording: "wellness music". Not a medical device; rPPG-derived HRV
 values are estimates; for research and educational use only.
@@ -43,6 +46,7 @@ import os
 import time
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -200,7 +204,7 @@ app = FastAPI(
         "with MCP discovery and signed HRV session receipts. "
         + DISCLAIMER
     ),
-    version="2.1.0",
+    version="2.2.0",
     contact={"name": "LGDA Technologies", "email": "solheefinery@gmail.com"},
 )
 
@@ -251,6 +255,73 @@ def x402_accepts_v2(price_atomic: int) -> dict:
     }
 
 
+def bazaar_extension(resource: str) -> dict:
+    """x402 v2 `bazaar` discovery extension for the /stream endpoint.
+
+    Declares the endpoint's HTTP method, query parameters and output
+    format so a facilitator can catalog it in a discovery index
+    (e.g. Coinbase Bazaar) when a payment settles. Per the spec at
+    specs/extensions/bazaar.md in coinbase/x402: `info` carries the
+    discovery data, `schema` is the Draft 2020-12 JSON Schema the
+    facilitator validates `info` against. The queryParams are the
+    concrete values from this request's resource URL, so a browsing
+    agent sees exactly how to call the endpoint.
+    """
+    params = parse_qs(urlparse(resource).query)
+    query_params: dict[str, str] = {}
+    if "track_id" in params:
+        query_params["track_id"] = params["track_id"][0]
+    if "album_id" in params:
+        query_params["album_id"] = params["album_id"][0]
+    query_params["session_id"] = params.get("session_id", ["your-session-id"])[0]
+    return {
+        "info": {
+            "input": {
+                "type": "http",
+                "method": "GET",
+                "queryParams": query_params,
+            },
+            "output": {
+                "type": "binary",
+                "format": "audio/mpeg",
+            },
+        },
+        "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string", "const": "http"},
+                        "method": {"type": "string", "enum": ["GET", "HEAD", "DELETE"]},
+                        "queryParams": {
+                            "type": "object",
+                            "properties": {k: {"type": "string"} for k in query_params},
+                            "required": list(query_params.keys()),
+                        },
+                        "headers": {
+                            "type": "object",
+                            "additionalProperties": {"type": "string"},
+                        },
+                    },
+                    "required": ["type", "method"],
+                    "additionalProperties": False,
+                },
+                "output": {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string"},
+                        "format": {"type": "string"},
+                    },
+                    "required": ["type"],
+                },
+            },
+            "required": ["input"],
+        },
+    }
+
+
 def x402_payment_required_v2(price_atomic: int, resource: str, description: str) -> dict:
     """v2 PaymentRequired object (goes in the PAYMENT-REQUIRED header)."""
     return {
@@ -265,7 +336,7 @@ def x402_payment_required_v2(price_atomic: int, resource: str, description: str)
             "iconUrl": f"{BASE_URL}/favicon.ico",
         },
         "accepts": [x402_accepts_v2(price_atomic)],
-        "extensions": {},
+        "extensions": {"bazaar": bazaar_extension(resource)},
     }
 
 
@@ -298,7 +369,7 @@ def _facilitator_post(path: str, payload: dict) -> dict:
     # which 403s urllib's default "Python-urllib/3.12" User-Agent.
     # Verified 2026-11-17: this UA passes, urllib's does not.
     with httpx.Client(timeout=15, headers={
-            "User-Agent": "lgda-music-node/2.1.0"}) as client:
+            "User-Agent": "lgda-music-node/2.2.0"}) as client:
         resp = client.post(X402_FACILITATOR_URL.rstrip("/") + path,
                            json=payload)
         resp.raise_for_status()
@@ -413,7 +484,7 @@ def album_or_404(album_id: str) -> dict:
 
 HOMEPAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>LGDA Autonomic Pacing Node</title></head><body>
-<h1>LGDA Autonomic Pacing Node (v2.1.0)</h1>
+<h1>LGDA Autonomic Pacing Node (v2.2.0)</h1>
 <p>Machine-readable front door for the LGDA Technologies wellness music
 catalog — 27 tracks across 9 albums. AI agents discover this node via
 the <a href="/mcp">MCP manifest</a>, pay per track ($5.99) or album
@@ -444,7 +515,7 @@ def healthz():
     loaded = sum(1 for t in TRACKS if audio_path(t).exists())
     return {
         "status": "ok",
-        "version": "2.1.0",
+        "version": "2.2.0",
         "tracks": len(TRACKS),
         "albums": len(ALBUMS),
         "audio_files_loaded": loaded,
@@ -701,7 +772,7 @@ def build_receipt(req: VerifySessionRequest) -> dict:
         track_ids = list(ALBUMS[req.album_id]["track_ids"])
     receipt = {
         "node": "lgda-autonomic-node",
-        "version": "2.1.0",
+        "version": "2.2.0",
         "session_id": req.session_id,
         "agent_id": req.agent_id,
         "track_ids": track_ids,
@@ -812,7 +883,7 @@ def manifest() -> dict:
         "schema_version": "lgda-mcp-manifest/1",
         "name": "lgda-autonomic-node",
         "title": "LGDA Autonomic Pacing Node",
-        "version": "2.1.0",
+        "version": "2.2.0",
         "description": (
             "Stateless M2M node: x402-paid wellness music (27 tracks, "
             "9 albums) + signed HRV session receipts. The music is the "
@@ -893,7 +964,7 @@ async def mcp_rpc(request: Request):
         return _rpc_result(req_id, {
             "protocolVersion": "2025-06-18",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "lgda-autonomic-node", "version": "2.1.0"},
+            "serverInfo": {"name": "lgda-autonomic-node", "version": "2.2.0"},
         })
     if method == "ping":
         return _rpc_result(req_id, {})

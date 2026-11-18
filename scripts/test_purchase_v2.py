@@ -80,6 +80,10 @@ def sign_payment_v2(acct, nonce: bytes, valid_before: int, required: dict):
     payload = {"x402Version": 2,
                "resource": required["resource"],
                "accepted": required["accepts"][0],
+               # Real v2 clients echo the 402's extensions into the
+               # payload; the facilitator only catalogs the bazaar
+               # discovery info when it arrives here.
+               "extensions": required.get("extensions", {}),
                "payload": {"signature": "0x" + signed.signature.hex(),
                            "authorization": auth}}
     return base64.b64encode(json.dumps(payload).encode()).decode()
@@ -114,7 +118,10 @@ def main():
     assert acc["amount"] == "5990000", acc
     assert acc["asset"] == USDC
     assert acc["payTo"] == PAY_TO
-    print("1. 402 with v2 PAYMENT-REQUIRED header + v1 body: OK")
+    assert "bazaar" in required.get("extensions", {}), "no bazaar extension in 402"
+    baz = required["extensions"]["bazaar"]
+    assert baz["info"]["input"]["queryParams"]["track_id"] == track_id
+    print("1. 402 with v2 PAYMENT-REQUIRED header + v1 body + bazaar extension: OK")
 
     # 2. pay (v2)
     nonce = secrets.token_bytes(32)

@@ -10,7 +10,7 @@ automatically the first time a payment for it settles through a
 facilitator that runs a discovery index (CDP or x402.org). Each index is
 independent — settling through one lists you on that one only. For
 richer discovery metadata, the 402 response should carry the `bazaar`
-extension (x402 v2); our node speaks x402 v1 and does not declare it yet.
+extension (x402 v2); our node declares it since v2.2.0 (see below).
 The manual directory alternative is x402scan
 (https://www.x402scan.com/resources/register — paste a URL, it validates
 the 402 and lists it, no account needed).
@@ -79,3 +79,23 @@ on the lens. Agents can submit pre/post HRV telemetry to
 - [x] v2 deployed, `/healthz` reports `audio_files_loaded: 27` (verified live 2026-11-17: 27 loaded, 0 missing; FDCD = Won't Shake, Out The Window, The Antidote)
 - [x] Testnet vs mainnet decided; wallet confirmed by owner (mainnet, live 2026-11-17)
 - [x] A test x402 payment verified end-to-end on the live node (track + album flows, testnet, 2026-11-17)
+
+## Bazaar extension — LIVE in v2.2.0 (2026-11-17)
+
+The v2 402 now carries the `bazaar` extension (info: HTTP GET /stream,
+queryParams track_id/album_id + session_id, output binary audio/mpeg;
+schema: Draft 2020-12, info validated against it in tests). Verified
+live on mainnet: the PAYMENT-REQUIRED header decodes with
+extensions.bazaar present. A v2 testnet purchase with a client echoing
+the extension settled cleanly (tx 0x9a14ce1e...), proving the x402.org
+facilitator accepts bazaar-extended payloads even though its /supported
+list does not name the extension.
+
+Caveat (verified 2026-11-17): the x402.org facilitator does NOT expose
+the optional discovery endpoints — GET /discovery/resources and
+/discovery/search both return the site's 404 page. So whether it
+catalogs the resource internally cannot be checked from outside, and
+the CDP index only catalogs mainnet settlements. The extension is the
+spec's declared discovery mechanism and is live; the first real
+(mainnet) sale is still the moment to check the CDP index for the
+listing.

@@ -88,7 +88,7 @@ rows shown — the header figures are recorded verbatim in
    `X-PAYMENT-RESPONSE` settlement header.
 5. `POST /verify-session` with pre/post HRV segments — signed receipt.
 
-### x402 versions (dual-serve, v2.1.0)
+### x402 versions (dual-serve, v2.2.0)
 
 The node speaks x402 v1 **and** v2. The 402 carries the canonical v2
 `PaymentRequired` object in the `PAYMENT-REQUIRED` header (base64 JSON:
@@ -98,6 +98,13 @@ network name). Payments are accepted on either header; the EIP-3009
 authorization is identical in both versions and the facilitator
 accepts both. v2 is required by x402scan and by the x402 Bazaar
 discovery index; v1 is kept so existing clients keep working.
+
+v2.2.0 adds the x402 `bazaar` discovery extension to the v2 402, so
+facilitators can catalog the /stream endpoint (HTTP method, query
+params, MP3 output) in a discovery index. A v2 testnet purchase with
+the extension echoed in the payload settled cleanly (tx
+0x9a14ce1e72f4842ad19df651d4f9ec9fc7abe89667c85c2e1ebfe798207b3885),
+proving the facilitator accepts it.
 
 ### Entitlement model
 
@@ -120,7 +127,7 @@ discovery index; v1 is kept so existing clients keep working.
 | `GET /catalog` | Full catalog + evidence |
 | `GET /catalog/{track_id}` | One track + its sessions |
 | `GET /albums`, `GET /albums/{album_id}` | Album browsing |
-| `GET /mcp` | MCP manifest (v2.1.0, 5 tools) |
+| `GET /mcp` | MCP manifest (v2.2.0, 5 tools) |
 | `POST /mcp` | JSON-RPC: `initialize`, `ping`, `tools/list`, `tools/call` |
 | `GET\|POST /stream` | x402-paywalled MP3 (see above) |
 | `POST /verify-session` | Signed HRV receipt (v1-compatible shape + optional `track_id`/`album_id`) |
