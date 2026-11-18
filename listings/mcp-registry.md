@@ -1,6 +1,6 @@
 # MCP Registry — draft listing
 
-**Status: PUBLISHED — v2.1.0 live (2026-11-17, status active, isLatest true); v2.2.0 republish pending.**
+**Status: PUBLISHED — v2.2.0 live (2026-11-17 17:18 MST, status active, isLatest true).**
 Registry: https://registry.modelcontextprotocol.io (publish via `mcp-publisher` / GitHub-based flow; see registry docs at submission time.)
 
 ## Server entry
