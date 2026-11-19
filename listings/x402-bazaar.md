@@ -70,6 +70,15 @@ on the lens. Agents can submit pre/post HRV telemetry to
 3. `GET /stream?track_id=...&session_id=...` with `X-PAYMENT` — receive the MP3 + an `X-LGDA-Session` token.
 4. `POST /verify-session` with pre/post HRV — receive a signed receipt.
 
+## License
+
+Every purchase is a single-buyer license: the buyer may download, keep,
+and play the MP3 in sessions for its own user; LGDA Technologies keeps
+all ownership (masters/copyright, artist Slator Blacc); no resale,
+sharing, redistribution, remixing, commercial use, or model training;
+the Ed25519-signed receipt is the proof of license. Full terms: the
+License section of the repo README.
+
 ## Disclaimer (include verbatim)
 
 > Wellness music. Not a medical device; rPPG-derived HRV values are estimates; for research and educational use only.

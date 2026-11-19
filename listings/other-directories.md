@@ -3,6 +3,14 @@
 All free. All point at https://lgda-music.fly.dev with the
 $5.99/$14.99 "wellness music" wording.
 
+License line (applies to all submissions): every purchase is a
+single-buyer license — the buyer may download, keep, and play the MP3
+in sessions for its own user; LGDA Technologies keeps all ownership
+(masters/copyright, artist Slator Blacc); no resale, sharing,
+redistribution, remixing, commercial use, or model training; the
+Ed25519-signed receipt is the proof of license. Full terms: the License
+section of the repo README.
+
 ## mcp.directory — SUBMITTED, in review
 
 Form at https://mcp.directory/submit (repo URL + description + email).

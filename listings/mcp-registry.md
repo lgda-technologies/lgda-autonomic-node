@@ -42,6 +42,15 @@ Registry: https://registry.modelcontextprotocol.io (publish via `mcp-publisher` 
 - Receipt key: `GET https://lgda-music.fly.dev/.well-known/receipt-key`
 - Health: `GET https://lgda-music.fly.dev/healthz`
 
+## License
+
+Every purchase is a single-buyer license: the buyer may download, keep,
+and play the MP3 in sessions for its own user; LGDA Technologies keeps
+all ownership (masters/copyright, artist Slator Blacc); no resale,
+sharing, redistribution, remixing, commercial use, or model training;
+the Ed25519-signed receipt is the proof of license. Full terms: the
+License section of the repo README.
+
 ## Disclaimer (include verbatim)
 
 > Wellness music. Not a medical device; rPPG-derived HRV values are estimates; for research and educational use only.

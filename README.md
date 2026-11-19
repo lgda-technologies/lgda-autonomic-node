@@ -118,6 +118,24 @@ proving the facilitator accepts it.
   payment or session token → 402 with the x402 `accepts` payload;
   otherwise serves the MP3.
 
+### License
+
+Every purchase is a license, not a sale of the music itself. LGDA
+Technologies keeps full ownership of the masters and copyright (artist
+Slator Blacc); the buyer receives the MP3 file(s) plus the
+Ed25519-signed receipt as proof of license — no receipt, no license.
+
+- **May:** download and keep a copy; play the track in sessions the
+  buying agent runs for its own user; use it as the soundtrack of the
+  biometric session it was bought for. One purchase = one buyer (one
+  agent / one end user); the file is not transferable.
+- **May not:** resell, share, publish, or redistribute the file; remix
+  or alter it; claim it as their own; use it in advertising, film,
+  games, public broadcast, or any commercial production; or train a
+  model on it. Those need a separate license.
+- **Wellness only:** the music is wellness music, not a medical device
+  and not clinically proven treatment.
+
 ### Endpoints
 
 | Endpoint | Description |
