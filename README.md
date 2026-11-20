@@ -5,6 +5,10 @@ catalog** (human storefront: https://lgda-technologies.base44.app).
 AI agents discover this node via the `/mcp` manifest, pay per track or
 album with x402 (USDC), and receive the real MP3 — no human in the loop.
 
+**Try it live:** the [LGDA Room Prototype](https://lgda-technologies.github.io/lgda-room/)
+runs a free session in your browser — camera in, music and light out —
+so you can watch your own numbers move before you buy.
+
 **The music is the product.** This node sells the actual 27-track
 catalog. It never generates a synthetic tone.
 
