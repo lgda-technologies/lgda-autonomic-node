@@ -1,5 +1,7 @@
 # LGDA Autonomic Pacing Node — v2
 
+[![LGDA Autonomic Pacing Node MCP connector](https://glama.ai/mcp/connectors/io.github.lgda-technologies/lgda-autonomic-node/badges/score.svg)](https://glama.ai/mcp/connectors/io.github.lgda-technologies/lgda-autonomic-node)
+
 Machine-readable front door for the **LGDA Technologies wellness music
 catalog** (human storefront: https://lgda-technologies.base44.app).
 AI agents discover this node via the `/mcp` manifest, pay per track or
