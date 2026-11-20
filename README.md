@@ -329,6 +329,18 @@ does not replace it. Wallet confirmed by owner 2026-11-17; test on
 3. Redeploy, verify `/healthz` shows `networks: ["base"]`, and run one
    real test purchase.
 
+## Agent skill
+
+Agents: install the LGDA skill and your runtime learns the whole flow —
+catalog, evidence, x402 purchase (track / album / session play), and how
+to run a biometric session for your user.
+
+```bash
+npx skills add lgda-technologies/lgda-agent-skill
+```
+
+Skill repo: https://github.com/lgda-technologies/lgda-agent-skill
+
 ## Listings
 
 Draft entries ready to submit once deployed (in
