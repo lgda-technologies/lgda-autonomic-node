@@ -119,6 +119,19 @@ v2.2.0 served "USDC" on both networks, so a mainnet payer's EIP-3009
 signature would not have verified and settlement would have failed.
 Caught by PayAPI Market's listing check, 2026-11-19.
 
+v2.4.0 is the findability + probe-compat release. `/stream` returns
+the x402 402 **before** parameter validation: bare `/stream` used to
+422 (FastAPI validated `track_id` + `session_id` first), which broke
+probe-based directories and the x402gle audition
+(`discovery_failed` / `not_402`). The payment flow is now
+verify → validate → settle, so a payment for an unknown track, a
+missing `session_id`, or unloaded audio is verified but never
+settled. New discovery surfaces: the `/.well-known/x402` (+ `.json`)
+manifest, `/.well-known/x402-trust.txt` (x402 Trust provider key),
+the SEP-2127 server card (`/mcp/server-card`) + AI Catalog
+(`/.well-known/ai-catalog.json`, `/.well-known/ard.json`), MCP tool
+annotations, and OpenAPI `x-payment-info` / `x-guidance` for x402gle.
+
 ### Entitlement model
 
 - A track payment ($5.99) entitles the buyer to that one track.
@@ -126,10 +139,12 @@ Caught by PayAPI Market's listing check, 2026-11-19.
   album. Pay once (resource `/stream?album_id=...`), then present the
   issued `X-LGDA-Session` token to `/stream` for each track — the token
   lists the entitled `track_ids` and is Ed25519-signed by the node.
-- `/stream` checks, in order: unknown track → 404; audio file missing →
-  503 (never takes payment for a track it cannot deliver); no valid
-  payment or session token → 402 with the x402 `accepts` payload;
-  otherwise serves the MP3.
+- `/stream` checks, in order: no valid payment or session token →
+  402 with the x402 `accepts` payload (regardless of params — bare
+  `/stream` returns 402, never 422); payment presented → verify via
+  the facilitator, then validate (unknown track → 404, audio file
+  missing → 503), then settle. A payment for audio the node cannot
+  deliver is verified but never settled.
 
 ### License
 
@@ -158,12 +173,16 @@ Ed25519-signed receipt as proof of license — no receipt, no license.
 | `GET /catalog` | Full catalog + evidence |
 | `GET /catalog/{track_id}` | One track + its sessions |
 | `GET /albums`, `GET /albums/{album_id}` | Album browsing |
-| `GET /mcp` | MCP manifest (v2.3.0, 5 tools) |
+| `GET /mcp` | MCP manifest (v2.4.0, 5 tools) |
 | `POST /mcp` | JSON-RPC: `initialize`, `ping`, `tools/list`, `tools/call` |
 | `GET\|POST /stream` | x402-paywalled MP3 (see above) |
 | `POST /verify-session` | Signed HRV receipt (v1-compatible shape + optional `track_id`/`album_id`) |
 | `POST /pay/stripe` | Stub: `{"enabled": false}` until Stripe is implemented |
 | `GET /.well-known/receipt-key` | Ed25519 public key (JWK) |
+| `GET /.well-known/x402`, `/.well-known/x402.json` | x402 discovery manifest (paid endpoints) |
+| `GET /.well-known/x402-trust.txt` | x402 Trust provider key (P-256) |
+| `GET /mcp/server-card`, `/.well-known/mcp/server-card.json` | SEP-2127 MCP server card |
+| `GET /.well-known/ai-catalog.json`, `/.well-known/ard.json` | AI Catalog / ARD manifest (domain discovery) |
 | `GET /docs` | OpenAPI docs |
 
 ## Adding the 27 MP3s
@@ -236,12 +255,19 @@ pip install -r requirements-dev.txt
 python -m pytest tests/ -v
 ```
 
-13 tests cover: catalog loads (27 tracks / 9 albums), pricing math,
+31 tests cover: catalog loads (27 tracks / 9 albums), pricing math,
 manifest tools, evidence aggregates recomputed from `sessions.json`,
-homepage, health, `/stream` 503/404/402 + session-token delivery,
-receipt signature verification, MCP JSON-RPC calls, the Stripe stub,
-and the wording ban (no "clinically calibrated" in any agent-facing
-response).
+homepage, health, `/stream` 402-before-validation (bare /stream →
+402; unpaid unknown track / missing audio → 402) + session-token
+delivery, the verify-then-validate-then-settle invariant (paid
+unknown track → 404, paid missing audio → 503, paid missing params →
+400, all without a `/settle` call), receipt signature verification,
+MCP JSON-RPC calls, the Stripe stub, the wording ban (no "clinically
+calibrated" in any agent-facing response), the v1/v2 dual-serve 402
+and per-network EIP-712 domain names, the bazaar extension, the
+`/.well-known/x402` manifest, `x402-trust.txt`, the server card +
+AI Catalog, tool titles/annotations, and the OpenAPI
+`x-guidance` / `x-payment-info` blocks.
 
 ## Deploy (Fly.io)
 

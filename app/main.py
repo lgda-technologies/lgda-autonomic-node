@@ -1,5 +1,5 @@
 """
-LGDA Autonomic Pacing Node — v2.3.0.
+LGDA Autonomic Pacing Node — v2.4.0.
 
 What this is: a machine-readable front door for LGDA Technologies'
 wellness music catalog (https://lgda-technologies.base44.app).
@@ -28,6 +28,18 @@ What changed from v1 (see README.md for the full list):
   v2.2.0 served "USDC" on both networks, so a mainnet payer's
   EIP-3009 signature would not have verified and settlement would
   have failed. Caught by PayAPI Market's listing check, 2026-11-19.
+- v2.4.0 is the findability + probe-compat release. /stream returns
+  the x402 402 BEFORE parameter validation: bare /stream used to
+  422 (FastAPI validated track_id + session_id first), which broke
+  probe-based directories and the x402gle audition
+  (discovery_failed / not_402). The payment flow is now
+  verify -> validate -> settle, so a payment for an unknown track,
+  a missing session_id, or unloaded audio is verified but never
+  settled. New discovery surfaces: the /.well-known/x402 (+ .json)
+  manifest, /.well-known/x402-trust.txt (x402 Trust provider key),
+  the SEP-2127 server card (/mcp/server-card) + AI Catalog
+  (/.well-known/ai-catalog.json, /.well-known/ard.json), MCP tool
+  annotations, and OpenAPI x-payment-info / x-guidance for x402gle.
 
 Wording: "wellness music". Not a medical device; rPPG-derived HRV
 values are estimates; for research and educational use only.
@@ -55,17 +67,19 @@ from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 try:
+    from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.hazmat.primitives.asymmetric.ed25519 import (
         Ed25519PrivateKey,
         Ed25519PublicKey,
     )
     from cryptography.hazmat.primitives import serialization
 except ImportError:  # pragma: no cover - cryptography is in requirements.txt
+    ec = None  # type: ignore
     Ed25519PrivateKey = None  # type: ignore
 
 # ---------------------------------------------------------------- config
@@ -85,6 +99,10 @@ X402_FACILITATOR_URL = os.environ.get(
 )
 RECEIPT_KEY_FILE = Path(
     os.environ.get("RECEIPT_KEY_FILE", ROOT / "data" / "receipt_key.json")
+)
+# P-256 keypair for x402 Trust provider verification (see TrustKey).
+TRUST_KEY_FILE = Path(
+    os.environ.get("X402_TRUST_KEY_FILE", ROOT / "data" / "x402_trust_key.json")
 )
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 
@@ -213,6 +231,57 @@ class ReceiptKey:
 
 RECEIPT_KEY = ReceiptKey()
 
+
+class TrustKey:
+    """P-256 keypair for x402 Trust provider verification.
+
+    x402 Trust (x402-trust.com) verifies a provider by a public key
+    published at /.well-known/x402-trust.txt plus a confirmed email.
+    The file format, verified against a live provider file
+    (mcp.zeamprism.com, 2026-11-19), is one line:
+        x402-trust-verification=v1:<base64url, unpadded, DER SPKI>
+    where the key is P-256 (the example decodes to a 91-byte SPKI
+    starting 30 59 30 13). The private key authorizes changes to the
+    verification (removal included), so it must be kept safe: set
+    X402_TRUST_PRIVATE_KEY_B64 (base64 of the raw 32-byte P-256
+    private scalar) as a Fly secret so the key survives redeploys,
+    exactly like the receipt key. The node itself only ever serves
+    the PUBLIC key; the private key is used by the owner, off-node,
+    when claiming or changing the verification with x402 Trust.
+    """
+
+    def __init__(self) -> None:
+        if ec is None:
+            raise RuntimeError("cryptography package is required")
+        seed_b64 = os.environ.get("X402_TRUST_PRIVATE_KEY_B64", "")
+        if seed_b64:
+            scalar = int.from_bytes(base64.b64decode(seed_b64), "big")
+            self.private = ec.derive_private_key(scalar, ec.SECP256R1())
+        elif TRUST_KEY_FILE.exists():
+            data = json.loads(TRUST_KEY_FILE.read_text())
+            scalar = int.from_bytes(base64.b64decode(data["private_key_b64"]), "big")
+            self.private = ec.derive_private_key(scalar, ec.SECP256R1())
+        else:
+            self.private = ec.generate_private_key(ec.SECP256R1())
+            TRUST_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+            scalar = self.private.private_numbers().private_value.to_bytes(32, "big")
+            TRUST_KEY_FILE.write_text(
+                json.dumps({"private_key_b64": _b64(scalar), "note": "PRIVATE - do not commit"}, indent=2)
+            )
+            os.chmod(TRUST_KEY_FILE, 0o600)
+        self.public = self.private.public_key()
+        spki_der = self.public.public_bytes(
+            serialization.Encoding.DER,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        self.verification_value = "v1:" + _b64url(spki_der)
+
+    def trust_txt(self) -> str:
+        return f"x402-trust-verification={self.verification_value}\n"
+
+
+TRUST_KEY = TrustKey()
+
 # ---------------------------------------------------------------- app
 
 app = FastAPI(
@@ -222,9 +291,31 @@ app = FastAPI(
         "with MCP discovery and signed HRV session receipts. "
         + DISCLAIMER
     ),
-    version="2.3.0",
+    version="2.4.0",
     contact={"name": "LGDA Technologies", "email": "solheefinery@gmail.com"},
 )
+
+
+_orig_openapi = app.openapi
+
+
+def custom_openapi():
+    """OpenAPI with the x-guidance hint x402gle's discovery prefers
+    (see https://www.x402gle.com/agent.md): the document itself tells
+    an agent what the API is for and how to pay for it."""
+    schema = _orig_openapi()
+    schema.setdefault("info", {})["x-guidance"] = (
+        "AI agents: browse the LGDA wellness music catalog free via "
+        "/mcp (list_catalog, get_track_evidence), then buy a track "
+        "($5.99 USDC) or an album ($14.99 USDC, all 3 tracks) with "
+        "x402 on GET /stream. An unpaid /stream request returns HTTP "
+        "402 with the payment challenge; retry with a PAYMENT-SIGNATURE "
+        "(x402 v2) or X-PAYMENT (v1) header to receive the MP3."
+    )
+    return schema
+
+
+app.openapi = custom_openapi
 
 # ---------------------------------------------------------------- helpers
 
@@ -394,7 +485,7 @@ def _facilitator_post(path: str, payload: dict) -> dict:
     # which 403s urllib's default "Python-urllib/3.12" User-Agent.
     # Verified 2026-11-17: this UA passes, urllib's does not.
     with httpx.Client(timeout=15, headers={
-            "User-Agent": "lgda-music-node/2.3.0"}) as client:
+            "User-Agent": "lgda-music-node/2.4.0"}) as client:
         resp = client.post(X402_FACILITATOR_URL.rstrip("/") + path,
                            json=payload)
         resp.raise_for_status()
@@ -412,17 +503,18 @@ def _decode_payment_header(payment_header: str) -> dict:
         return json.loads(payment_header)
 
 
-def verify_and_settle_payment(payment_header: str, price_atomic: int,
-                              resource: str, description: str) -> dict:
-    """Verify + settle an x402 payment via the facilitator.
+def verify_payment(payment_header: str, price_atomic: int,
+                   resource: str, description: str) -> tuple:
+    """Verify an x402 payment via the facilitator. Verification moves
+    no money — it only checks the EIP-3009 authorization against the
+    payment requirements. Returns (payment_payload, requirements,
+    version). Raises HTTPException 402 on any failure.
 
     Version-aware: the payload's x402Version picks the facilitator
     dialect (v1: X-PAYMENT shape, plain network names; v2:
     PAYMENT-SIGNATURE shape, CAIP-2 network, `accepted` envelope).
     The EIP-3009 authorization inside is identical in both versions,
-    and the facilitator accepts both. Returns the settle result (with
-    transaction hash) or raises HTTPException 402. No audio is served
-    on an unverified payment.
+    and the facilitator accepts both.
 
     NOTE: the live facilitator (x402.org) expects the decoded
     `paymentPayload` object, not the base64 `paymentHeader` string —
@@ -450,6 +542,15 @@ def verify_and_settle_payment(payment_header: str, price_atomic: int,
         raise HTTPException(402, f"Payment verification unavailable: {exc}")
     if not verified.get("isValid"):
         raise HTTPException(402, f"Payment invalid: {verified.get('invalidReason', 'unknown')}")
+    return payment_payload, requirements, version
+
+
+def settle_payment(payment_payload: dict, requirements: dict, version: int) -> dict:
+    """Settle a payment that has already been verified. Call ONLY
+    after deliverability validation (track exists, audio loaded) —
+    settling is the step that moves money, and it must never happen
+    for audio the node cannot deliver. Returns the settle result
+    (with transaction hash) or raises HTTPException 402."""
     try:
         settled = _facilitator_post("/settle", {
             "x402Version": version,
@@ -509,7 +610,7 @@ def album_or_404(album_id: str) -> dict:
 
 HOMEPAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>LGDA Autonomic Pacing Node</title></head><body>
-<h1>LGDA Autonomic Pacing Node (v2.3.0)</h1>
+<h1>LGDA Autonomic Pacing Node (v2.4.0)</h1>
 <p>Machine-readable front door for the LGDA Technologies wellness music
 catalog — 27 tracks across 9 albums. AI agents discover this node via
 the <a href="/mcp">MCP manifest</a>, pay per track ($5.99) or album
@@ -523,6 +624,9 @@ instead.)</p>
 <li><a href="/docs">/docs</a> — OpenAPI docs</li>
 <li><a href="/healthz">/healthz</a> — health check</li>
 <li><a href="/.well-known/receipt-key">/.well-known/receipt-key</a> — Ed25519 receipt key</li>
+<li><a href="/.well-known/x402">/.well-known/x402</a> — x402 discovery manifest (paid endpoints)</li>
+<li><a href="/mcp/server-card">/mcp/server-card</a> — MCP server card (SEP-2127)</li>
+<li><a href="/.well-known/ai-catalog.json">/.well-known/ai-catalog.json</a> — AI catalog (domain discovery)</li>
 </ul>
 <p>Human storefront: <a href="https://lgda-technologies.base44.app">lgda-technologies.base44.app</a></p>
 <p><em>Wellness music. Not a medical device; rPPG-derived HRV values are
@@ -540,7 +644,7 @@ def healthz():
     loaded = sum(1 for t in TRACKS if audio_path(t).exists())
     return {
         "status": "ok",
-        "version": "2.3.0",
+        "version": "2.4.0",
         "tracks": len(TRACKS),
         "albums": len(ALBUMS),
         "audio_files_loaded": loaded,
@@ -568,6 +672,235 @@ def receipt_key():
         "canonicalization": "json:sort_keys,compact,utf8",
         "ephemeral": False,
     }
+
+# ---------------------------------------------------------------- discovery: x402 manifest, trust, server card
+
+def x402_manifest() -> dict:
+    """Machine-readable x402 discovery manifest.
+
+    No authoritative schema exists for /.well-known/x402 — the x402
+    protocol does not standardize a per-service manifest (Masumi's
+    x402-agent-manifest doc says so explicitly). This serves the two
+    conventions indexers actually read, in one document:
+    `resources[]` (the shape x402scan / Bazaar / agentic.market
+    index, per the nirholas services) and `endpoints[]` (the
+    /.well-known/x402.json convention). JSON parsers ignore unknown
+    keys, so carrying both is harmless. Served at both
+    /.well-known/x402 and /.well-known/x402.json.
+
+    Album resources point at the first track's stream URL with
+    album_id: that URL is the one a buyer actually pays (one $14.99
+    payment entitles all 3 tracks; the issued session token unlocks
+    the other two). A bare ?album_id= URL with no track_id cannot
+    complete a purchase, so it is not listed as a resource.
+    """
+    network = caip2_network(X402_NETWORK)
+    asset = usdc_asset(X402_NETWORK)
+    resources: list = []
+    for track in CATALOG["tracks"]:
+        tid = track["track_id"]
+        resources.append({
+            "resource": f"{BASE_URL}/stream?track_id={tid}&session_id=your-session-id",
+            "type": "http",
+            "method": "GET",
+            "description": f"Wellness music track: {track['title']} ({track['album']}) — MP3",
+            "accepts": [x402_accepts_v2(TRACK_PRICE_ATOMIC)],
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "track_id": {"type": "string", "const": tid},
+                    "session_id": {"type": "string", "description": "Caller-chosen session id"},
+                },
+                "required": ["track_id", "session_id"],
+            },
+            "outputSchema": {
+                "type": "string",
+                "contentMediaType": "audio/mpeg",
+                "description": "MP3 audio file",
+            },
+        })
+    for album in CATALOG["albums"]:
+        first = album["track_ids"][0]
+        resources.append({
+            "resource": (
+                f"{BASE_URL}/stream?track_id={first}"
+                f"&album_id={album['album_id']}&session_id=your-session-id"
+            ),
+            "type": "http",
+            "method": "GET",
+            "description": (
+                f"Wellness music album: {album['title']} (3 MP3 tracks) — "
+                "one $14.99 payment entitles all 3 tracks; the first track "
+                "is served immediately and the X-LGDA-Session token unlocks "
+                "the other two"
+            ),
+            "accepts": [x402_accepts_v2(ALBUM_PRICE_ATOMIC)],
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "track_id": {"type": "string", "const": first},
+                    "album_id": {"type": "string", "const": album["album_id"]},
+                    "session_id": {"type": "string", "description": "Caller-chosen session id"},
+                },
+                "required": ["track_id", "album_id", "session_id"],
+            },
+            "outputSchema": {
+                "type": "string",
+                "contentMediaType": "audio/mpeg",
+                "description": "MP3 audio file (first track of the album)",
+            },
+        })
+    endpoints = [
+        {
+            "path": "/stream",
+            "method": "GET",
+            "description": "Buy one wellness music track (MP3)",
+            "price_usd": TRACK_PRICE_USD,
+            "maxAmountRequired": str(TRACK_PRICE_ATOMIC),
+            "network": network,
+            "asset": asset,
+            "payTo": PAY_TO_ADDRESS,
+            "mimeType": "audio/mpeg",
+            "parameters": ["track_id", "session_id"],
+        },
+        {
+            "path": "/stream",
+            "method": "GET",
+            "description": "Buy one wellness music album (3 MP3 tracks, $14.99)",
+            "price_usd": ALBUM_PRICE_USD,
+            "maxAmountRequired": str(ALBUM_PRICE_ATOMIC),
+            "network": network,
+            "asset": asset,
+            "payTo": PAY_TO_ADDRESS,
+            "mimeType": "audio/mpeg",
+            "parameters": ["track_id", "album_id", "session_id"],
+        },
+    ]
+    return {
+        "x402Version": 2,
+        "name": "LGDA Autonomic Pacing Node",
+        "serviceName": "LGDA Music",
+        "description": (
+            "x402-paywalled wellness music catalog (27 tracks, 9 albums). "
+            + DISCLAIMER
+        ),
+        "network": network,
+        "asset": asset,
+        "payTo": PAY_TO_ADDRESS,
+        "scheme": "exact",
+        "resources": resources,
+        "endpoints": endpoints,
+    }
+
+
+@app.get("/.well-known/x402", tags=["discovery"])
+def well_known_x402():
+    return x402_manifest()
+
+
+@app.get("/.well-known/x402.json", tags=["discovery"])
+def well_known_x402_json():
+    return x402_manifest()
+
+
+@app.get("/.well-known/x402-trust.txt", tags=["discovery"])
+def well_known_x402_trust():
+    """x402 Trust provider key (see TrustKey). Plain text, one line."""
+    return PlainTextResponse(TRUST_KEY.trust_txt())
+
+
+SERVER_CARD_SCHEMA = "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json"
+
+
+def server_card() -> dict:
+    """SEP-2127 MCP Server Card (extension io.modelcontextprotocol/
+    server-card, Final 2026-10-06). A static document naming the
+    server and where to connect; tools and capabilities stay in live
+    negotiation and are deliberately NOT in the card. Field set
+    follows the published example: $schema, name (reverse-DNS, one
+    slash), version, title, description (max 100 chars), websiteUrl,
+    remotes[]."""
+    return {
+        "$schema": SERVER_CARD_SCHEMA,
+        "name": "io.github.lgda-technologies/lgda-autonomic-node",
+        "version": "2.4.0",
+        "title": "LGDA Autonomic Pacing Node",
+        "description": "Buy LGDA wellness music with USDC: 27 tracks, x402 payments, signed HRV receipts.",
+        "websiteUrl": BASE_URL,
+        "remotes": [
+            {
+                "type": "streamable-http",
+                "url": f"{BASE_URL}/mcp",
+                "supportedProtocolVersions": ["2025-06-18", "2025-03-26", "2024-11-05"],
+            }
+        ],
+    }
+
+
+def _server_card_response() -> JSONResponse:
+    """Card with the headers the SEP-2127 discovery notes ask for:
+    application/mcp-server-card+json, CORS *, 1h public cache, ETag."""
+    card = server_card()
+    etag = hashlib.sha256(canonical_json(card)).hexdigest()[:16]
+    return JSONResponse(
+        content=card,
+        media_type="application/mcp-server-card+json",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=3600",
+            "ETag": f'"{etag}"',
+        },
+    )
+
+
+@app.get("/mcp/server-card", tags=["discovery"])
+def mcp_server_card():
+    """Canonical card location: <streamable-http-url>/server-card."""
+    return _server_card_response()
+
+
+@app.get("/.well-known/mcp/server-card.json", tags=["discovery"])
+def well_known_server_card():
+    """Legacy scanner path (SEP-1649): same card, byte-identical."""
+    return _server_card_response()
+
+
+def ai_catalog() -> dict:
+    """AI Catalog / ARD manifest: domain-level discovery for the MCP
+    server card. Served byte-identical at both paths — ARD v0.91
+    names /.well-known/ard.json, the SEP-2127 discovery notes and
+    Lighthouse name /.well-known/ai-catalog.json, and readers sit on
+    both sides of the rename. One entry, pointing at the card."""
+    host = urlparse(BASE_URL).hostname or "lgda-music.fly.dev"
+    return {
+        "specVersion": "1.0",
+        "entries": [
+            {
+                "identifier": f"urn:air:{host}:mcp:lgda-autonomic-node",
+                "displayName": "LGDA Autonomic Pacing Node",
+                "type": "application/mcp-server-card+json",
+                "url": f"{BASE_URL}/mcp/server-card",
+            }
+        ],
+    }
+
+
+def _ai_catalog_response() -> JSONResponse:
+    return JSONResponse(
+        content=ai_catalog(),
+        media_type="application/ai-catalog+json",
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
+
+
+@app.get("/.well-known/ai-catalog.json", tags=["discovery"])
+def well_known_ai_catalog():
+    return _ai_catalog_response()
+
+
+@app.get("/.well-known/ard.json", tags=["discovery"])
+def well_known_ard():
+    return _ai_catalog_response()
 
 # ---------------------------------------------------------------- catalog
 
@@ -650,81 +983,160 @@ def album_purchase(album_id: str, session_id: str) -> dict:
 
 # ---------------------------------------------------------------- stream (paywalled)
 
-def _stream(track_id: str, session_id: str, album_id: Optional[str],
-            x_payment: Optional[str], payment_signature: Optional[str],
-            x_session: Optional[str]):
+def _stream_resource(track_id: Optional[str], session_id: Optional[str],
+                     album_id: Optional[str]) -> str:
+    """Resource URL for a 402, built from whichever params are present.
+    Full-param requests produce exactly the URLs v2.3.0 produced."""
+    if album_id:
+        q = f"album_id={album_id}"
+        if session_id:
+            q += f"&session_id={session_id}"
+        return f"{BASE_URL}/stream?{q}"
+    params = []
+    if track_id:
+        params.append(f"track_id={track_id}")
+    if session_id:
+        params.append(f"session_id={session_id}")
+    return f"{BASE_URL}/stream" + ("?" + "&".join(params) if params else "")
+
+
+def _stream_pricing(track_id: Optional[str],
+                    album_id: Optional[str]) -> tuple:
+    """(price_atomic, description) for the 402. Never raises: unknown
+    or missing ids get the generic description — the 402 is served
+    before any validation (see _stream)."""
+    if album_id:
+        album = ALBUMS.get(album_id)
+        if album:
+            return ALBUM_PRICE_ATOMIC, f"Wellness music album: {album['title']} (3 MP3 tracks)"
+        return ALBUM_PRICE_ATOMIC, "Wellness music album (3 MP3 tracks)"
+    track = TRACKS.get(track_id) if track_id else None
+    if track:
+        return TRACK_PRICE_ATOMIC, f"Wellness music track: {track['title']} (MP3)"
+    return TRACK_PRICE_ATOMIC, "Wellness music track (MP3)"
+
+
+# x402gle's discovery prefers OpenAPI with an x-payment-info block on
+# each paid operation (see https://www.x402gle.com/agent.md). The
+# shape below is best-effort (the agent.md names a structured `price`
+# without fixing its fields); it is metadata only and cannot affect
+# the payment flow.
+STREAM_X_PAYMENT_INFO = {
+    "x-payment-info": {
+        "protocols": ["x402"],
+        "price": {
+            "amount": "5.99",
+            "currency": "USD",
+            "atomicAmount": str(TRACK_PRICE_ATOMIC),
+            "asset": usdc_asset(X402_NETWORK),
+            "network": caip2_network(X402_NETWORK),
+        },
+        "description": (
+            "One track $5.99 USDC; add album_id for the $14.99 album "
+            "price (all 3 tracks). track_id and session_id are required "
+            "to complete a purchase; an unpaid request returns HTTP 402 "
+            "with the x402 challenge."
+        ),
+    }
+}
+
+
+def _stream(track_id: Optional[str], session_id: Optional[str],
+            album_id: Optional[str], x_payment: Optional[str],
+            payment_signature: Optional[str], x_session: Optional[str]):
+    """402-before-validation (v2.4.0).
+
+    An unpaid request gets the x402 challenge no matter what its
+    params look like — bare /stream returns 402, not 422 — so probes
+    and crawlers see a valid payment manifest instead of a validation
+    error. When payment IS presented, the order is verify ->
+    validate -> settle: a payment for an unknown track, a missing
+    session_id, or unloaded audio is verified but NEVER settled (the
+    EIP-3009 authorization stays unused; the payer can retry with
+    correct params). Verification moves no money; only settle does.
+    """
+    # 1. Session token (issued after a verified payment) grants access
+    #    without a new payment — but only for a track it entitles, and
+    #    only if that track's audio is loaded.
+    if x_session and track_id:
+        token = parse_session_token(x_session)
+        if token and track_id in token.get("track_ids", []):
+            track_or_404(track_id)
+            path = audio_path(track_id)
+            if not path.exists():
+                raise HTTPException(503, "audio file not yet loaded for this track")
+            return FileResponse(path, media_type="audio/mpeg", filename=f"{track_id}.mp3")
+
+    # 2. Otherwise a fresh x402 payment is required. No payment header
+    #    -> 402, regardless of params. This is the probe-compat fix:
+    #    bare /stream used to 422 here (FastAPI validated the query
+    #    params before this code ran).
+    payment_header = payment_signature or x_payment
+    price, desc = _stream_pricing(track_id, album_id)
+    resource = _stream_resource(track_id, session_id, album_id)
+    if not payment_header:
+        return x402_402(price, resource, desc)
+
+    # 3. Payment presented: VERIFY first (moves no money), then
+    #    VALIDATE deliverability, then SETTLE. Never settle for
+    #    undeliverable audio.
+    payment_payload, requirements, version = verify_payment(
+        payment_header, price, resource, desc)
+    if not session_id:
+        raise HTTPException(400, "session_id is required to complete a purchase")
+    if not track_id:
+        raise HTTPException(400, "track_id is required to complete a purchase")
     track = track_or_404(track_id)
+    grant = [track_id]
     if album_id:
         album = album_or_404(album_id)
         if track_id not in album["track_ids"]:
             raise HTTPException(400, f"Track {track_id} is not on album {album_id}")
-
-    # 1. Never take payment for a track whose audio is not loaded.
+        grant = album["track_ids"]
     path = audio_path(track_id)
     if not path.exists():
         raise HTTPException(503, "audio file not yet loaded for this track")
-
-    # 2. Session token (issued after a verified payment) grants access.
-    entitled: Optional[list] = None
-    if x_session:
-        token = parse_session_token(x_session)
-        if token and track_id in token.get("track_ids", []):
-            entitled = token["track_ids"]
-
-    # 3. Otherwise a fresh x402 payment is required.
-    payment_tx = None
-    if entitled is None:
-        if album_id:
-            price, resource = ALBUM_PRICE_ATOMIC, f"{BASE_URL}/stream?album_id={album_id}&session_id={session_id}"
-            desc = f"Wellness music album: {ALBUMS[album_id]['title']} (3 MP3 tracks)"
-            grant = ALBUMS[album_id]["track_ids"]
-        else:
-            price, resource = TRACK_PRICE_ATOMIC, f"{BASE_URL}/stream?track_id={track_id}&session_id={session_id}"
-            desc = f"Wellness music track: {track['title']} (MP3)"
-            grant = [track_id]
-        # v2 clients send PAYMENT-SIGNATURE; v1 clients send X-PAYMENT.
-        # Either is accepted (dual-serve); v2 takes precedence if both
-        # are present.
-        payment_header = payment_signature or x_payment
-        if not payment_header:
-            return x402_402(price, resource, desc)
-        settled = verify_and_settle_payment(payment_header, price, resource, desc)
-        payment_tx = settled.get("transaction") or settled.get("txHash")
-        token = issue_session_token(session_id, grant, payment_tx)
-        response = FileResponse(path, media_type="audio/mpeg", filename=f"{track_id}.mp3")
-        response.headers["X-LGDA-Session"] = token
-        # Settlement receipt in both dialects (base64 JSON), so v1 and
-        # v2 clients can both read the result.
-        settle_response = {
-            "success": True,
-            "transaction": payment_tx or "",
-            "network": caip2_network(X402_NETWORK),
-            "payer": settled.get("payer") or "",
-        }
-        response.headers["PAYMENT-RESPONSE"] = _b64(
-            json.dumps(settle_response, separators=(",", ":")).encode()
-        )
-        response.headers["X-PAYMENT-RESPONSE"] = _b64(
-            json.dumps(settled, separators=(",", ":")).encode()
-        )
-        return response
-
-    return FileResponse(path, media_type="audio/mpeg", filename=f"{track_id}.mp3")
+    settled = settle_payment(payment_payload, requirements, version)
+    payment_tx = settled.get("transaction") or settled.get("txHash")
+    token = issue_session_token(session_id, grant, payment_tx)
+    response = FileResponse(path, media_type="audio/mpeg", filename=f"{track_id}.mp3")
+    response.headers["X-LGDA-Session"] = token
+    # Settlement receipt in both dialects (base64 JSON), so v1 and
+    # v2 clients can both read the result.
+    settle_response = {
+        "success": True,
+        "transaction": payment_tx or "",
+        "network": caip2_network(X402_NETWORK),
+        "payer": settled.get("payer") or "",
+    }
+    response.headers["PAYMENT-RESPONSE"] = _b64(
+        json.dumps(settle_response, separators=(",", ":")).encode()
+    )
+    response.headers["X-PAYMENT-RESPONSE"] = _b64(
+        json.dumps(settled, separators=(",", ":")).encode()
+    )
+    return response
 
 
-@app.get("/stream", tags=["stream"])
-def stream_get(track_id: str, session_id: str, album_id: Optional[str] = None,
-               x_payment: Optional[str] = Header(default=None, alias="X-PAYMENT"),
-               payment_signature: Optional[str] = Header(default=None, alias="PAYMENT-SIGNATURE"),
-               x_session: Optional[str] = Header(default=None, alias="X-LGDA-Session")):
+@app.get("/stream", tags=["stream"], openapi_extra=STREAM_X_PAYMENT_INFO)
+def stream_get(
+        track_id: Optional[str] = Query(default=None, description="Track slug, e.g. midnight. Required to complete a purchase; an unpaid request returns 402 without it."),
+        session_id: Optional[str] = Query(default=None, description="Caller-chosen session id. Required to complete a purchase."),
+        album_id: Optional[str] = Query(default=None, description="Album slug. When present, the $14.99 album price applies and the payment entitles all 3 tracks."),
+        x_payment: Optional[str] = Header(default=None, alias="X-PAYMENT"),
+        payment_signature: Optional[str] = Header(default=None, alias="PAYMENT-SIGNATURE"),
+        x_session: Optional[str] = Header(default=None, alias="X-LGDA-Session")):
     return _stream(track_id, session_id, album_id, x_payment, payment_signature, x_session)
 
 
-@app.post("/stream", tags=["stream"])
-def stream_post(track_id: str, session_id: str, album_id: Optional[str] = None,
-                x_payment: Optional[str] = Header(default=None, alias="X-PAYMENT"),
-                payment_signature: Optional[str] = Header(default=None, alias="PAYMENT-SIGNATURE"),
-                x_session: Optional[str] = Header(default=None, alias="X-LGDA-Session")):
+@app.post("/stream", tags=["stream"], openapi_extra=STREAM_X_PAYMENT_INFO)
+def stream_post(
+        track_id: Optional[str] = Query(default=None, description="Track slug, e.g. midnight. Required to complete a purchase; an unpaid request returns 402 without it."),
+        session_id: Optional[str] = Query(default=None, description="Caller-chosen session id. Required to complete a purchase."),
+        album_id: Optional[str] = Query(default=None, description="Album slug. When present, the $14.99 album price applies and the payment entitles all 3 tracks."),
+        x_payment: Optional[str] = Header(default=None, alias="X-PAYMENT"),
+        payment_signature: Optional[str] = Header(default=None, alias="PAYMENT-SIGNATURE"),
+        x_session: Optional[str] = Header(default=None, alias="X-LGDA-Session")):
     return _stream(track_id, session_id, album_id, x_payment, payment_signature, x_session)
 
 # ---------------------------------------------------------------- stripe stub
@@ -797,7 +1209,7 @@ def build_receipt(req: VerifySessionRequest) -> dict:
         track_ids = list(ALBUMS[req.album_id]["track_ids"])
     receipt = {
         "node": "lgda-autonomic-node",
-        "version": "2.3.0",
+        "version": "2.4.0",
         "session_id": req.session_id,
         "agent_id": req.agent_id,
         "track_ids": track_ids,
@@ -839,6 +1251,7 @@ TOOLS = [
         "title": "List the wellness music catalog",
         "description": "List all 9 albums and 27 wellness music tracks with prices ($5.99/track, $14.99/album) and per-track session evidence. No payment required.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
     },
     {
         "name": "get_track_evidence",
@@ -850,6 +1263,7 @@ TOOLS = [
             "required": ["track_id"],
             "additionalProperties": False,
         },
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
     },
     {
         "name": "purchase_track",
@@ -865,6 +1279,7 @@ TOOLS = [
             "required": ["track_id", "session_id"],
             "additionalProperties": False,
         },
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
     },
     {
         "name": "purchase_album",
@@ -880,11 +1295,12 @@ TOOLS = [
             "required": ["album_id", "session_id"],
             "additionalProperties": False,
         },
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
     },
     {
         "name": "verify_session",
         "title": "Verify a listening session and get a signed receipt",
-        "description": "Submit pre/post HRV segments (RMSSD, IBI, source) for a paid session and receive an Ed25519-signed receipt. Not paywalled.",
+        "description": "Submit pre/post HRV segments (RMSSD, IBI, source) for a paid session and receive an Ed25519-signed receipt — the proof of license for the purchase (no receipt, no license). Not paywalled.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -899,6 +1315,7 @@ TOOLS = [
             "required": ["session_id", "agent_id", "pre", "post"],
             "additionalProperties": False,
         },
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
     },
 ]
 
@@ -908,7 +1325,7 @@ def manifest() -> dict:
         "schema_version": "lgda-mcp-manifest/1",
         "name": "lgda-autonomic-node",
         "title": "LGDA Autonomic Pacing Node",
-        "version": "2.3.0",
+        "version": "2.4.0",
         "description": (
             "Stateless M2M node: x402-paid wellness music (27 tracks, "
             "9 albums) + signed HRV session receipts. The music is the "
@@ -951,6 +1368,9 @@ def manifest() -> dict:
             "pay_stripe": {"url": f"{BASE_URL}/pay/stripe", "method": "POST", "enabled": False},
             "verify_session": {"url": f"{BASE_URL}/verify-session", "method": "POST", "paywalled": False},
             "receipt_key": {"url": f"{BASE_URL}/.well-known/receipt-key", "method": "GET"},
+            "x402_manifest": {"url": f"{BASE_URL}/.well-known/x402", "method": "GET"},
+            "server_card": {"url": f"{BASE_URL}/mcp/server-card", "method": "GET"},
+            "ai_catalog": {"url": f"{BASE_URL}/.well-known/ai-catalog.json", "method": "GET"},
             "health": {"url": f"{BASE_URL}/healthz", "method": "GET"},
         },
         "disclaimer": DISCLAIMER,
@@ -989,7 +1409,7 @@ async def mcp_rpc(request: Request):
         return _rpc_result(req_id, {
             "protocolVersion": "2025-06-18",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "lgda-autonomic-node", "version": "2.3.0"},
+            "serverInfo": {"name": "lgda-autonomic-node", "version": "2.4.0"},
         })
     if method == "ping":
         return _rpc_result(req_id, {})

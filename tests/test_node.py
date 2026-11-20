@@ -14,6 +14,7 @@ from pathlib import Path
 # generates/loads its key at import time).
 TMP = Path(tempfile.mkdtemp(prefix="lgda-test-"))
 os.environ["RECEIPT_KEY_FILE"] = str(TMP / "receipt_key.json")
+os.environ["X402_TRUST_KEY_FILE"] = str(TMP / "x402_trust_key.json")
 os.environ["AUDIO_DIR"] = str(TMP / "audio")
 (TMP / "audio").mkdir(exist_ok=True)
 os.environ.setdefault("X402_NETWORK", "base-sepolia")
@@ -65,7 +66,7 @@ def test_manifest_tools_exist():
     m = r.json()
     assert m["schema_version"] == "lgda-mcp-manifest/1"
     assert m["name"] == "lgda-autonomic-node"
-    assert m["version"] == "2.3.0"
+    assert m["version"] == "2.4.0"
     names = {t["name"] for t in m["tools"]}
     assert names == {
         "list_catalog",
@@ -129,21 +130,31 @@ def test_healthz():
     r = client.get("/healthz")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
-    assert r.json()["version"] == "2.3.0"
+    assert r.json()["version"] == "2.4.0"
     assert r.json()["x402_versions"] == [1, 2]
     assert r.json()["tracks"] == 27
     assert r.json()["audio_files_loaded"] == 0  # test audio dir is empty
 
 
-def test_stream_missing_audio_is_503_not_a_tone():
+def test_stream_missing_audio_unpaid_is_402_not_503():
+    """v2.4.0: the 402 comes BEFORE validation. An unpaid request for
+    a track whose audio is not loaded gets the payment challenge, not
+    a 503 — probes and crawlers must see a 402. The 503 still applies
+    once payment is presented (see test_paid_missing_audio_is_503_
+    without_settlement): the node never settles for audio it cannot
+    deliver."""
     r = client.get("/stream", params={"track_id": "midnight", "session_id": "t1"})
-    assert r.status_code == 503
-    assert r.json()["detail"] == "audio file not yet loaded for this track"
+    assert r.status_code == 402
+    assert r.json()["x402Version"] == 1
 
 
-def test_stream_unknown_track_is_404():
+def test_stream_unknown_track_unpaid_is_402_not_404():
+    """v2.4.0: same ordering as above — an unpaid request for an
+    unknown track gets the 402, not a 404. The 404 still applies once
+    payment is presented (see test_paid_unknown_track_is_404_without_
+    settlement)."""
     r = client.get("/stream", params={"track_id": "nope", "session_id": "t1"})
-    assert r.status_code == 404
+    assert r.status_code == 402
 
 
 def test_stream_paywall_402_then_token_serves_file(tmp_path=None):
@@ -454,3 +465,206 @@ def test_bazaar_extension_album_402():
         jsonschema.validate(instance=baz["info"], schema=baz["schema"])
     finally:
         audio.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------- v2.4.0
+
+def _v2_payment_header(amount="5990000"):
+    """A well-shaped v2 payment payload (the mocked facilitator does
+    not check the signature, only the version + requirements)."""
+    payload = {
+        "x402Version": 2,
+        "resource": {"url": "https://lgda-music.fly.dev/stream"},
+        "accepted": {
+            "scheme": "exact", "network": "eip155:84532",
+            "amount": amount,
+            "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "payTo": "0x8da12fca05e38aeda66f112fcf2ef6036c7bd666",
+        },
+        "payload": {
+            "signature": "0x" + "ab" * 65,
+            "authorization": {
+                "from": "0xbuyer", "to": "0x8da12fca05e38aeda66f112fcf2ef6036c7bd666",
+                "value": amount, "validAfter": "1", "validBefore": "9999999999",
+                "nonce": "0x" + "cd" * 32,
+            },
+        },
+    }
+    return base64.b64encode(json.dumps(payload).encode()).decode()
+
+
+def test_stream_bare_returns_402():
+    """R1: bare GET /stream returns the x402 402, not a 422. Probes
+    and crawlers (x402gle audition) hit this URL with no params."""
+    r = client.get("/stream")
+    assert r.status_code == 402
+    body = r.json()
+    assert body["x402Version"] == 1
+    assert body["accepts"][0]["maxAmountRequired"] == "5990000"
+    assert body["accepts"][0]["extra"] == {"name": "USDC", "version": "2"}
+    assert body["accepts"][0]["resource"] == "https://lgda-music.fly.dev/stream"
+    v2 = json.loads(base64.b64decode(r.headers["payment-required"]))
+    assert v2["x402Version"] == 2
+    assert v2["accepts"][0]["amount"] == "5990000"
+    assert v2["accepts"][0]["extra"] == {"name": "USDC", "version": "2"}
+
+
+def test_stream_bare_post_returns_402():
+    r = client.post("/stream")
+    assert r.status_code == 402
+    assert r.json()["x402Version"] == 1
+
+
+def test_paid_unknown_track_is_404_without_settlement(monkeypatch):
+    """R1 hard invariant: a payment for an unknown track verifies but
+    is NEVER settled. The facilitator sees /verify only."""
+    calls = []
+    monkeypatch.setattr(main_module, "_facilitator_post", _fake_facilitator(calls, 2))
+    r = client.get("/stream", params={"track_id": "nope", "session_id": "t1"},
+                   headers={"PAYMENT-SIGNATURE": _v2_payment_header()})
+    assert r.status_code == 404
+    assert [p for p, _ in calls] == ["/verify"]
+
+
+def test_paid_missing_audio_is_503_without_settlement(monkeypatch):
+    """R1 hard invariant: a payment for a track whose audio is not
+    loaded verifies but is NEVER settled (503, no /settle call)."""
+    (TMP / "audio" / "midnight.mp3").unlink(missing_ok=True)
+    calls = []
+    monkeypatch.setattr(main_module, "_facilitator_post", _fake_facilitator(calls, 2))
+    r = client.get("/stream", params={"track_id": "midnight", "session_id": "t1"},
+                   headers={"PAYMENT-SIGNATURE": _v2_payment_header()})
+    assert r.status_code == 503
+    assert r.json()["detail"] == "audio file not yet loaded for this track"
+    assert [p for p, _ in calls] == ["/verify"]
+
+
+def test_paid_missing_params_is_400_without_settlement(monkeypatch):
+    """R1: payment presented with no track_id/session_id verifies but
+    is never settled — there is nothing to deliver."""
+    calls = []
+    monkeypatch.setattr(main_module, "_facilitator_post", _fake_facilitator(calls, 2))
+    r = client.get("/stream", headers={"PAYMENT-SIGNATURE": _v2_payment_header()})
+    assert r.status_code == 400
+    assert [p for p, _ in calls] == ["/verify"]
+
+
+def test_well_known_x402_manifest():
+    """R2: /.well-known/x402 (and .json) list every paid resource."""
+    for path in ["/.well-known/x402", "/.well-known/x402.json"]:
+        r = client.get(path)
+        assert r.status_code == 200, path
+        m = r.json()
+        assert m["x402Version"] == 2
+        assert m["scheme"] == "exact"
+        assert m["network"] == "eip155:84532"
+        assert m["asset"] == "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+        assert m["payTo"] == "0x8da12fca05e38aeda66f112fcf2ef6036c7bd666"
+        # 27 track resources + 9 album resources.
+        assert len(m["resources"]) == 36, path
+        track = next(x for x in m["resources"] if "track_id=midnight" in x["resource"])
+        assert track["accepts"][0]["amount"] == "5990000"
+        assert track["inputSchema"]["required"] == ["track_id", "session_id"]
+        assert track["outputSchema"]["contentMediaType"] == "audio/mpeg"
+        album = next(x for x in m["resources"] if "album_id=porter-ave" in x["resource"])
+        assert album["accepts"][0]["amount"] == "14990000"
+        assert "track_id=" in album["resource"]  # album pays on a track URL
+        assert len(m["endpoints"]) == 2
+        assert {e["price_usd"] for e in m["endpoints"]} == {5.99, 14.99}
+
+
+def test_well_known_x402_trust_txt():
+    """R3: /.well-known/x402-trust.txt carries the v1 P-256 SPKI line
+    (format verified against a live provider file, 2026-11-19)."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import load_der_public_key
+
+    r = client.get("/.well-known/x402-trust.txt")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/plain")
+    line = r.text.strip()
+    assert line.startswith("x402-trust-verification=v1:")
+    value = line.split("v1:", 1)[1]
+    der = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+    assert len(der) == 91  # P-256 SPKI DER
+    assert der[:2] == b"\x30\x59"
+    key = load_der_public_key(der)
+    assert isinstance(key, ec.EllipticCurvePublicKey)
+    assert key.curve.name == "secp256r1"
+
+
+def test_server_card_and_ai_catalog():
+    """R4: SEP-2127 server card + AI Catalog / ARD manifest."""
+    r = client.get("/mcp/server-card")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/mcp-server-card+json")
+    assert r.headers["access-control-allow-origin"] == "*"
+    assert "max-age=3600" in r.headers["cache-control"]
+    assert "etag" in r.headers
+    card = r.json()
+    assert card["$schema"] == "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json"
+    assert card["name"] == "io.github.lgda-technologies/lgda-autonomic-node"
+    assert card["name"].count("/") == 1
+    assert card["version"] == "2.4.0"
+    assert len(card["description"]) <= 100
+    assert card["remotes"][0]["type"] == "streamable-http"
+    assert card["remotes"][0]["url"] == "https://lgda-music.fly.dev/mcp"
+    assert "2025-06-18" in card["remotes"][0]["supportedProtocolVersions"]
+    # Legacy scanner path serves the identical card.
+    r2 = client.get("/.well-known/mcp/server-card.json")
+    assert r2.status_code == 200
+    assert r2.json() == card
+    # Both catalog paths serve the identical manifest.
+    for path in ["/.well-known/ai-catalog.json", "/.well-known/ard.json"]:
+        rc = client.get(path)
+        assert rc.status_code == 200, path
+        assert rc.headers["content-type"].startswith("application/ai-catalog+json")
+        cat = rc.json()
+        assert cat["specVersion"] == "1.0"
+        assert len(cat["entries"]) == 1
+        entry = cat["entries"][0]
+        assert entry["type"] == "application/mcp-server-card+json"
+        assert entry["url"] == "https://lgda-music.fly.dev/mcp/server-card"
+        assert entry["identifier"].startswith("urn:air:lgda-music.fly.dev:mcp:")
+        assert entry["displayName"] == "LGDA Autonomic Pacing Node"
+
+
+def test_mcp_tools_have_titles_and_annotations():
+    """R5: every tool carries a human-readable title and the four MCP
+    annotation hints (Glama flagged both as missing)."""
+    r = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    assert r.status_code == 200
+    tools = r.json()["result"]["tools"]
+    assert len(tools) == 5
+    by_name = {t["name"]: t for t in tools}
+    for name, tool in by_name.items():
+        assert tool["title"].strip(), name
+        ann = tool["annotations"]
+        for hint in ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"]:
+            assert isinstance(ann[hint], bool), (name, hint)
+    # Read tools are read-only; purchase tools touch the outside world.
+    assert by_name["list_catalog"]["annotations"]["readOnlyHint"] is True
+    assert by_name["get_track_evidence"]["annotations"]["readOnlyHint"] is True
+    assert by_name["purchase_track"]["annotations"]["openWorldHint"] is True
+    assert by_name["purchase_track"]["annotations"]["readOnlyHint"] is False
+    assert by_name["purchase_album"]["annotations"]["openWorldHint"] is True
+    assert by_name["verify_session"]["annotations"]["readOnlyHint"] is True
+
+
+def test_openapi_x_guidance_and_x_payment_info():
+    """R2 (x402gle): OpenAPI carries info.x-guidance and the /stream
+    operations carry x-payment-info; track_id/session_id are
+    documented as optional at the HTTP layer (402 comes first)."""
+    spec = client.get("/openapi.json").json()
+    assert "x-guidance" in spec["info"]
+    assert "402" in spec["info"]["x-guidance"]
+    assert spec["info"]["version"] == "2.4.0"
+    for method in ["get", "post"]:
+        op = spec["paths"]["/stream"][method]
+        pay = op["x-payment-info"]
+        assert pay["protocols"] == ["x402"]
+        assert pay["price"]["amount"] == "5.99"
+        assert pay["price"]["currency"] == "USD"
+        params = {p["name"]: p for p in op["parameters"]}
+        assert params["track_id"]["required"] is False
+        assert params["session_id"]["required"] is False
