@@ -1300,10 +1300,14 @@ def _play(track_id: Optional[str], session_id: Optional[str],
     money; only settle does.
 
     Unlike /stream, a play grants nothing durable: no session token,
-    no PAYMENT-RESPONSE / X-PAYMENT-RESPONSE settlement headers, no
-    signed receipt. The response is the MP3 once, plus headers
-    stating the terms. A session token from a purchase does NOT
-    grant a free play — /play always requires a fresh $0.05 payment.
+    no signed LGDA receipt. The x402 settlement-confirmation headers
+    (PAYMENT-RESPONSE / X-PAYMENT-RESPONSE) ARE returned, as on
+    /stream — they are protocol-level proof the payment settled, not
+    an ownership receipt, and paying clients (auditions, routers)
+    need them to confirm the purchase. The response is the MP3 once,
+    plus headers stating the terms. A session token from a purchase
+    does NOT grant a free play — /play always requires a fresh $0.05
+    payment.
     """
     payment_header = payment_signature or x_payment
     price, desc = _play_pricing(track_id)
@@ -1320,9 +1324,25 @@ def _play(track_id: Optional[str], session_id: Optional[str],
     path = audio_path(track_id)
     if not path.exists():
         raise HTTPException(503, "audio file not yet loaded for this track")
-    settle_payment(payment_payload, requirements, version)
+    settled = settle_payment(payment_payload, requirements, version)
+    payment_tx = settled.get("transaction") or settled.get("txHash")
     response = FileResponse(path, media_type="audio/mpeg", filename=f"{track_id}.mp3")
     response.headers["X-LGDA-Session-Play"] = "single-use"
+    # Settlement confirmation in both dialects (base64 JSON), as on
+    # /stream — protocol-level proof the payment settled, not an
+    # ownership receipt.
+    settle_response = {
+        "success": True,
+        "transaction": payment_tx or "",
+        "network": caip2_network(X402_NETWORK),
+        "payer": settled.get("payer") or "",
+    }
+    response.headers["PAYMENT-RESPONSE"] = _b64(
+        json.dumps(settle_response, separators=(",", ":")).encode()
+    )
+    response.headers["X-PAYMENT-RESPONSE"] = _b64(
+        json.dumps(settled, separators=(",", ":")).encode()
+    )
     response.headers["X-LGDA-License"] = (
         "session-play-only; no ownership, no file retention, "
         "no redistribution, no receipt"

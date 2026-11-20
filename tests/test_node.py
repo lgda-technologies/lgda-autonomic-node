@@ -774,8 +774,9 @@ def test_play_paid_missing_params_is_400_without_settlement(monkeypatch):
 def test_play_v2_payment_accepted(monkeypatch):
     """A v2 PAYMENT-SIGNATURE $0.05 play settles (mocked facilitator)
     and returns the audio bytes — with the single-use terms headers
-    and NO session token and NO settlement/receipt headers. A play
-    grants nothing durable."""
+    and NO session token. The x402 settlement-confirmation headers
+    ARE returned (protocol-level proof of payment, not an ownership
+    receipt). A play grants nothing durable."""
     audio = TMP / "audio" / "midnight.mp3"
     audio.write_bytes(b"ID3fake-mp3-bytes")
     calls = []
@@ -789,10 +790,14 @@ def test_play_v2_payment_accepted(monkeypatch):
         # Terms headers state the deal.
         assert r.headers["x-lgda-session-play"] == "single-use"
         assert "no ownership" in r.headers["x-lgda-license"]
-        # Nothing durable is granted.
+        # Nothing durable is granted — no session token.
         assert "x-lgda-session" not in r.headers
-        assert "payment-response" not in r.headers
-        assert "x-payment-response" not in r.headers
+        # But the x402 settlement confirmation IS returned, so the
+        # payer can verify the payment settled.
+        resp = json.loads(base64.b64decode(r.headers["payment-response"]))
+        assert resp["success"] is True
+        assert resp["transaction"] == "0xfake-tx"
+        assert "x-payment-response" in r.headers
         # The facilitator saw v2-shaped $0.05 requirements.
         assert [p for p, _ in calls] == ["/verify", "/settle"]
         reqs = calls[0][1]["paymentRequirements"]
@@ -831,6 +836,8 @@ def test_play_v1_payment_accepted(monkeypatch):
         assert r.content == b"ID3fake-mp3-bytes"
         assert r.headers["x-lgda-session-play"] == "single-use"
         assert "x-lgda-session" not in r.headers
+        resp = json.loads(base64.b64decode(r.headers["payment-response"]))
+        assert resp["success"] is True
         reqs = calls[0][1]["paymentRequirements"]
         assert reqs["network"] == "base-sepolia"
         assert reqs["maxAmountRequired"] == "50000"

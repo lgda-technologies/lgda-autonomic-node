@@ -5,9 +5,11 @@ Same flow as test_purchase_v2.py, but for the $0.05 single session play
 (v2.5.0): reads the PAYMENT-REQUIRED header from the /play 402, signs
 the identical EIP-3009 authorization for 50000 atomic USDC, and sends
 the v2 envelope in the PAYMENT-SIGNATURE header. Verifies the MP3
-bytes are identical to the catalog file, that NO session token and NO
-settlement/receipt headers are issued (a play grants nothing durable),
-and that a follow-up request without payment gets a 402 again.
+bytes are identical to the catalog file, that NO session token is
+issued (a play grants nothing durable) while the x402
+settlement-confirmation headers ARE returned (protocol-level proof
+the payment settled, not an ownership receipt), and that a follow-up
+request without payment gets a 402 again.
 
 Needs a funded throwaway buyer wallet at /tmp/buyer_wallet.json
 {"address": ..., "key": ...} — testnet only, never mainnet, never committed.
@@ -141,7 +143,7 @@ def main():
     assert baz["info"]["input"]["queryParams"]["track_id"] == track_id
     print("1. 402 with v2 PAYMENT-REQUIRED header + v1 body + bazaar extension: OK")
 
-    # 2. pay $0.05 (v2) — MP3 once, no token, no receipt headers
+    # 2. pay $0.05 (v2) — MP3 once, no token, settlement headers present
     nonce = secrets.token_bytes(32)
     header = sign_payment_v2(acct, nonce, int(time.time()) + 600, required)
     r = requests.get(f"{BASE_URL}/play",
@@ -151,8 +153,10 @@ def main():
         print(f"2. PAYMENT FAILED ({r.status_code}): {r.text[:500]}")
         return 1
     assert "X-LGDA-Session" not in r.headers, "a play must not issue a session token"
-    assert "PAYMENT-RESPONSE" not in r.headers, "a play must not issue a settlement header"
-    assert "X-PAYMENT-RESPONSE" not in r.headers, "a play must not issue a settlement header"
+    assert "PAYMENT-RESPONSE" in r.headers, "a play must return the settlement confirmation"
+    assert "X-PAYMENT-RESPONSE" in r.headers, "a play must return the settlement confirmation"
+    resp = json.loads(base64.b64decode(r.headers["PAYMENT-RESPONSE"]))
+    assert resp.get("success") is True, f"settlement not confirmed: {resp}"
     assert r.headers.get("X-LGDA-Session-Play") == "single-use", "missing single-use header"
     assert "no ownership" in r.headers.get("X-LGDA-License", ""), "missing license terms header"
     out = Path(f"/tmp/{track_id}-played-v2.mp3")
@@ -161,7 +165,7 @@ def main():
     same = (hashlib.sha256(out.read_bytes()).hexdigest()
             == hashlib.sha256(local.read_bytes()).hexdigest())
     print(f"2. paid $0.05 (v2) + streamed {len(r.content)/1e6:.1f} MB; "
-          f"matches local file: {same}; no token/receipt headers")
+          f"matches local file: {same}; no token, settlement confirmed")
     assert same, "downloaded MP3 differs from the catalog file!"
 
     # 3. no reuse: the same session without payment gets a 402 again
