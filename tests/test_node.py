@@ -65,7 +65,7 @@ def test_manifest_tools_exist():
     m = r.json()
     assert m["schema_version"] == "lgda-mcp-manifest/1"
     assert m["name"] == "lgda-autonomic-node"
-    assert m["version"] == "2.2.0"
+    assert m["version"] == "2.3.0"
     names = {t["name"] for t in m["tools"]}
     assert names == {
         "list_catalog",
@@ -129,7 +129,7 @@ def test_healthz():
     r = client.get("/healthz")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
-    assert r.json()["version"] == "2.2.0"
+    assert r.json()["version"] == "2.3.0"
     assert r.json()["x402_versions"] == [1, 2]
     assert r.json()["tracks"] == 27
     assert r.json()["audio_files_loaded"] == 0  # test audio dir is empty
@@ -263,6 +263,38 @@ def test_402_dual_serve_v1_body_v2_header():
         assert acc["payTo"] == "0x8da12fca05e38aeda66f112fcf2ef6036c7bd666"
         assert acc["extra"] == {"name": "USDC", "version": "2"}
     finally:
+        audio.unlink(missing_ok=True)
+
+
+def test_402_extra_name_per_network():
+    """The 402's EIP-712 domain name follows the network: mainnet
+    USDC's domain is "USD Coin", the base-sepolia test token's is
+    "USDC" (both verified against the on-chain DOMAIN_SEPARATOR).
+    v2.2.0 served "USDC" on both, which would have failed mainnet
+    settlement. Applies to the v1 body AND the v2 header."""
+    audio = TMP / "audio" / "midnight.mp3"
+    audio.write_bytes(b"ID3fake-mp3-bytes")
+    old_network = main_module.X402_NETWORK
+    try:
+        for network, name, asset, caip2 in [
+            ("base-sepolia", "USDC",
+             "0x036CbD53842c5426634e7929541eC2318f3dCF7e", "eip155:84532"),
+            ("base", "USD Coin",
+             "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "eip155:8453"),
+        ]:
+            main_module.X402_NETWORK = network
+            r = client.get("/stream", params={"track_id": "midnight", "session_id": "t1"})
+            assert r.status_code == 402
+            assert r.json()["accepts"][0]["extra"] == {"name": name, "version": "2"}
+            assert r.json()["accepts"][0]["asset"] == asset
+            assert r.json()["accepts"][0]["network"] == network
+            v2 = json.loads(base64.b64decode(r.headers["payment-required"]))
+            acc = v2["accepts"][0]
+            assert acc["extra"] == {"name": name, "version": "2"}
+            assert acc["asset"] == asset
+            assert acc["network"] == caip2
+    finally:
+        main_module.X402_NETWORK = old_network
         audio.unlink(missing_ok=True)
 
 

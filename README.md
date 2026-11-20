@@ -112,6 +112,13 @@ the extension echoed in the payload settled cleanly (tx
 0x9a14ce1e72f4842ad19df651d4f9ec9fc7abe89667c85c2e1ebfe798207b3885),
 proving the facilitator accepts it.
 
+v2.3.0 fixes the 402's EIP-712 domain name per network: mainnet
+USDC's domain name is "USD Coin", the base-sepolia test token's is
+"USDC" (both verified against the on-chain `DOMAIN_SEPARATOR`).
+v2.2.0 served "USDC" on both networks, so a mainnet payer's EIP-3009
+signature would not have verified and settlement would have failed.
+Caught by PayAPI Market's listing check, 2026-11-19.
+
 ### Entitlement model
 
 - A track payment ($5.99) entitles the buyer to that one track.
@@ -151,7 +158,7 @@ Ed25519-signed receipt as proof of license — no receipt, no license.
 | `GET /catalog` | Full catalog + evidence |
 | `GET /catalog/{track_id}` | One track + its sessions |
 | `GET /albums`, `GET /albums/{album_id}` | Album browsing |
-| `GET /mcp` | MCP manifest (v2.2.0, 5 tools) |
+| `GET /mcp` | MCP manifest (v2.3.0, 5 tools) |
 | `POST /mcp` | JSON-RPC: `initialize`, `ping`, `tools/list`, `tools/call` |
 | `GET\|POST /stream` | x402-paywalled MP3 (see above) |
 | `POST /verify-session` | Signed HRV receipt (v1-compatible shape + optional `track_id`/`album_id`) |

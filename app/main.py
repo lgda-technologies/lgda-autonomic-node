@@ -1,5 +1,5 @@
 """
-LGDA Autonomic Pacing Node — v2.2.0.
+LGDA Autonomic Pacing Node — v2.3.0.
 
 What this is: a machine-readable front door for LGDA Technologies'
 wellness music catalog (https://lgda-technologies.base44.app).
@@ -22,6 +22,12 @@ What changed from v1 (see README.md for the full list):
 - v2.2.0 adds the x402 `bazaar` discovery extension to the v2 402,
   so facilitators can catalog the /stream endpoint (HTTP method,
   query params, MP3 output) in a discovery index.
+- v2.3.0 fixes the 402's EIP-712 domain name per network: mainnet
+  USDC's domain name is "USD Coin", the base-sepolia test token's
+  is "USDC" (both verified against the on-chain DOMAIN_SEPARATOR).
+  v2.2.0 served "USDC" on both networks, so a mainnet payer's
+  EIP-3009 signature would not have verified and settlement would
+  have failed. Caught by PayAPI Market's listing check, 2026-11-19.
 
 Wording: "wellness music". Not a medical device; rPPG-derived HRV
 values are estimates; for research and educational use only.
@@ -96,6 +102,18 @@ USDC_ASSETS = {
 CAIP2_NETWORKS = {
     "base-sepolia": "eip155:84532",
     "base": "eip155:8453",
+}
+# EIP-712 domain name of the USDC contract per network. The two
+# contracts differ: mainnet USDC's domain name is "USD Coin"
+# (verified against the on-chain DOMAIN_SEPARATOR, 2026-11-19),
+# while the base-sepolia test token's is "USDC". The 402's extra.name
+# must match the contract's domain, or the payer's EIP-3009
+# signature will not verify and settlement fails. Do not collapse
+# this into a single constant: the testnet/mainnet difference is
+# exactly what v2.2.0 got wrong.
+EIP712_DOMAIN_NAMES = {
+    "base-sepolia": "USDC",
+    "base": "USD Coin",
 }
 TRACK_PRICE_USD = 5.99
 ALBUM_PRICE_USD = 14.99
@@ -204,7 +222,7 @@ app = FastAPI(
         "with MCP discovery and signed HRV session receipts. "
         + DISCLAIMER
     ),
-    version="2.2.0",
+    version="2.3.0",
     contact={"name": "LGDA Technologies", "email": "solheefinery@gmail.com"},
 )
 
@@ -224,6 +242,13 @@ def caip2_network(network: str) -> str:
         raise HTTPException(500, f"Unsupported X402_NETWORK: {network}")
 
 
+def eip712_domain_name(network: str) -> str:
+    try:
+        return EIP712_DOMAIN_NAMES[network]
+    except KeyError:
+        raise HTTPException(500, f"Unsupported X402_NETWORK: {network}")
+
+
 def x402_accepts(price_atomic: int, resource: str, description: str) -> dict:
     """v1 PaymentRequirements (kept for v1 clients)."""
     return {
@@ -236,7 +261,7 @@ def x402_accepts(price_atomic: int, resource: str, description: str) -> dict:
         "payTo": PAY_TO_ADDRESS,
         "maxTimeoutSeconds": 120,
         "asset": usdc_asset(X402_NETWORK),
-        "extra": {"name": "USDC", "version": "2"},
+        "extra": {"name": eip712_domain_name(X402_NETWORK), "version": "2"},
     }
 
 
@@ -251,7 +276,7 @@ def x402_accepts_v2(price_atomic: int) -> dict:
         "asset": usdc_asset(X402_NETWORK),
         "payTo": PAY_TO_ADDRESS,
         "maxTimeoutSeconds": 120,
-        "extra": {"name": "USDC", "version": "2"},
+        "extra": {"name": eip712_domain_name(X402_NETWORK), "version": "2"},
     }
 
 
@@ -369,7 +394,7 @@ def _facilitator_post(path: str, payload: dict) -> dict:
     # which 403s urllib's default "Python-urllib/3.12" User-Agent.
     # Verified 2026-11-17: this UA passes, urllib's does not.
     with httpx.Client(timeout=15, headers={
-            "User-Agent": "lgda-music-node/2.2.0"}) as client:
+            "User-Agent": "lgda-music-node/2.3.0"}) as client:
         resp = client.post(X402_FACILITATOR_URL.rstrip("/") + path,
                            json=payload)
         resp.raise_for_status()
@@ -484,7 +509,7 @@ def album_or_404(album_id: str) -> dict:
 
 HOMEPAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>LGDA Autonomic Pacing Node</title></head><body>
-<h1>LGDA Autonomic Pacing Node (v2.2.0)</h1>
+<h1>LGDA Autonomic Pacing Node (v2.3.0)</h1>
 <p>Machine-readable front door for the LGDA Technologies wellness music
 catalog — 27 tracks across 9 albums. AI agents discover this node via
 the <a href="/mcp">MCP manifest</a>, pay per track ($5.99) or album
@@ -515,7 +540,7 @@ def healthz():
     loaded = sum(1 for t in TRACKS if audio_path(t).exists())
     return {
         "status": "ok",
-        "version": "2.2.0",
+        "version": "2.3.0",
         "tracks": len(TRACKS),
         "albums": len(ALBUMS),
         "audio_files_loaded": loaded,
@@ -772,7 +797,7 @@ def build_receipt(req: VerifySessionRequest) -> dict:
         track_ids = list(ALBUMS[req.album_id]["track_ids"])
     receipt = {
         "node": "lgda-autonomic-node",
-        "version": "2.2.0",
+        "version": "2.3.0",
         "session_id": req.session_id,
         "agent_id": req.agent_id,
         "track_ids": track_ids,
@@ -883,7 +908,7 @@ def manifest() -> dict:
         "schema_version": "lgda-mcp-manifest/1",
         "name": "lgda-autonomic-node",
         "title": "LGDA Autonomic Pacing Node",
-        "version": "2.2.0",
+        "version": "2.3.0",
         "description": (
             "Stateless M2M node: x402-paid wellness music (27 tracks, "
             "9 albums) + signed HRV session receipts. The music is the "
@@ -964,7 +989,7 @@ async def mcp_rpc(request: Request):
         return _rpc_result(req_id, {
             "protocolVersion": "2025-06-18",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "lgda-autonomic-node", "version": "2.2.0"},
+            "serverInfo": {"name": "lgda-autonomic-node", "version": "2.3.0"},
         })
     if method == "ping":
         return _rpc_result(req_id, {})
