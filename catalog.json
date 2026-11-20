@@ -10,6 +10,9 @@
   "album_price_usd": 14.99,
   "album_price_usdc_atomic": 14990000,
   "price_note": "Album $14.99 saves $2.98 vs its 3 tracks separately (3 x $5.99 = $17.97). Agent price set by owner 2026-11-17 for cleaner buying; Base44 Vault still lists the album at $31.99.",
+  "session_play_price_usd": 0.05,
+  "session_play_price_usdc_atomic": 50000,
+  "session_play_note": "A session play ($0.05) streams one track once in the buying agent's session only: no ownership, no file retention, no redistribution, no session token, no signed receipt. Ownership is the $5.99 track / $14.99 album purchase.",
   "disclaimer": "Wellness music. Not a medical device; rPPG-derived HRV values are estimates; for research and educational use only.",
   "albums": [
     {

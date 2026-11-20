@@ -1,5 +1,5 @@
 """
-LGDA Autonomic Pacing Node — v2.4.0.
+LGDA Autonomic Pacing Node — v2.5.0.
 
 What this is: a machine-readable front door for LGDA Technologies'
 wellness music catalog (https://lgda-technologies.base44.app).
@@ -40,6 +40,13 @@ What changed from v1 (see README.md for the full list):
   the SEP-2127 server card (/mcp/server-card) + AI Catalog
   (/.well-known/ai-catalog.json, /.well-known/ard.json), MCP tool
   annotations, and OpenAPI x-payment-info / x-guidance for x402gle.
+- v2.5.0 adds a $0.05 per-session play: GET /play streams one
+  track once for 50000 atomic USDC, with no ownership, no file
+  retention, no session token and no signed receipt. It is a
+  separate product from the $5.99 track / $14.99 album purchase
+  (ownership). Same 402-before-validation rule and the same
+  verify -> validate -> settle invariant as /stream; the 402
+  carries the per-network EIP-712 domain name.
 
 Wording: "wellness music". Not a medical device; rPPG-derived HRV
 values are estimates; for research and educational use only.
@@ -49,6 +56,11 @@ Entitlement model (simple):
 - A track purchase pays $5.99 and entitles the buyer to that one
   track. An album purchase pays $14.99 and entitles the buyer to
   all 3 tracks on that album.
+- A session play pays $0.05 and is NOT a purchase: it streams one
+  track once, in the buying agent's session only. No ownership,
+  no file retention, no redistribution, no session token, no
+  signed receipt. Ownership is the $5.99 track / $14.99 album
+  purchase only.
 - After a successful x402 payment (verify + settle via the
   facilitator), the node issues a signed session token
   (X-LGDA-Session) listing the entitled track_ids. Present that
@@ -137,6 +149,8 @@ TRACK_PRICE_USD = 5.99
 ALBUM_PRICE_USD = 14.99
 TRACK_PRICE_ATOMIC = 5_990_000  # $5.99, 6-decimal USDC
 ALBUM_PRICE_ATOMIC = 14_990_000  # $14.99, 6-decimal USDC
+SESSION_PLAY_PRICE_USD = 0.05
+SESSION_PLAY_PRICE_ATOMIC = 50_000  # $0.05, 6-decimal USDC
 SESSION_TOKEN_TTL_S = 24 * 3600
 
 # ---------------------------------------------------------------- catalog
@@ -291,7 +305,7 @@ app = FastAPI(
         "with MCP discovery and signed HRV session receipts. "
         + DISCLAIMER
     ),
-    version="2.4.0",
+    version="2.5.0",
     contact={"name": "LGDA Technologies", "email": "solheefinery@gmail.com"},
 )
 
@@ -308,9 +322,11 @@ def custom_openapi():
         "AI agents: browse the LGDA wellness music catalog free via "
         "/mcp (list_catalog, get_track_evidence), then buy a track "
         "($5.99 USDC) or an album ($14.99 USDC, all 3 tracks) with "
-        "x402 on GET /stream. An unpaid /stream request returns HTTP "
-        "402 with the payment challenge; retry with a PAYMENT-SIGNATURE "
-        "(x402 v2) or X-PAYMENT (v1) header to receive the MP3."
+        "x402 on GET /stream, or play one track once in a session "
+        "($0.05 USDC, no ownership) on GET /play. An unpaid /stream "
+        "or /play request returns HTTP 402 with the payment "
+        "challenge; retry with a PAYMENT-SIGNATURE (x402 v2) or "
+        "X-PAYMENT (v1) header to receive the MP3."
     )
     return schema
 
@@ -372,7 +388,8 @@ def x402_accepts_v2(price_atomic: int) -> dict:
 
 
 def bazaar_extension(resource: str) -> dict:
-    """x402 v2 `bazaar` discovery extension for the /stream endpoint.
+    """x402 v2 `bazaar` discovery extension for a paywalled endpoint
+    (/stream or /play).
 
     Declares the endpoint's HTTP method, query parameters and output
     format so a facilitator can catalog it in a discovery index
@@ -485,7 +502,7 @@ def _facilitator_post(path: str, payload: dict) -> dict:
     # which 403s urllib's default "Python-urllib/3.12" User-Agent.
     # Verified 2026-11-17: this UA passes, urllib's does not.
     with httpx.Client(timeout=15, headers={
-            "User-Agent": "lgda-music-node/2.4.0"}) as client:
+            "User-Agent": "lgda-music-node/2.5.0"}) as client:
         resp = client.post(X402_FACILITATOR_URL.rstrip("/") + path,
                            json=payload)
         resp.raise_for_status()
@@ -610,17 +627,19 @@ def album_or_404(album_id: str) -> dict:
 
 HOMEPAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>LGDA Autonomic Pacing Node</title></head><body>
-<h1>LGDA Autonomic Pacing Node (v2.4.0)</h1>
+<h1>LGDA Autonomic Pacing Node (v2.5.0)</h1>
 <p>Machine-readable front door for the LGDA Technologies wellness music
 catalog — 27 tracks across 9 albums. AI agents discover this node via
 the <a href="/mcp">MCP manifest</a>, pay per track ($5.99) or album
-($14.99) with x402 (USDC), and receive the real MP3.</p>
+($14.99) with x402 (USDC) and receive the real MP3 — or play one track
+once in a session for $0.05 (no ownership).</p>
 <p><strong>This page (/) is not the API.</strong> (v1 returned
 <code>{"detail": "Not Found"}</code> here — v2 serves this explanation
 instead.)</p>
 <ul>
 <li><a href="/catalog">/catalog</a> — full catalog with per-track session evidence</li>
 <li><a href="/mcp">/mcp</a> — MCP manifest: tools, pricing, endpoints</li>
+<li><a href="/play">/play</a> — $0.05 single session play (one track, one play, no ownership)</li>
 <li><a href="/docs">/docs</a> — OpenAPI docs</li>
 <li><a href="/healthz">/healthz</a> — health check</li>
 <li><a href="/.well-known/receipt-key">/.well-known/receipt-key</a> — Ed25519 receipt key</li>
@@ -644,7 +663,7 @@ def healthz():
     loaded = sum(1 for t in TRACKS if audio_path(t).exists())
     return {
         "status": "ok",
-        "version": "2.4.0",
+        "version": "2.5.0",
         "tracks": len(TRACKS),
         "albums": len(ALBUMS),
         "audio_files_loaded": loaded,
@@ -750,6 +769,34 @@ def x402_manifest() -> dict:
                 "description": "MP3 audio file (first track of the album)",
             },
         })
+    # Session-play resources (v2.5.0): one per track at $0.05. A play
+    # streams the track once and grants no ownership — no file is
+    # kept, no session token and no receipt are issued.
+    for track in CATALOG["tracks"]:
+        tid = track["track_id"]
+        resources.append({
+            "resource": f"{BASE_URL}/play?track_id={tid}&session_id=your-session-id",
+            "type": "http",
+            "method": "GET",
+            "description": (
+                f"Wellness music session play: {track['title']} "
+                f"({track['album']}) — one $0.05 play, MP3, no ownership"
+            ),
+            "accepts": [x402_accepts_v2(SESSION_PLAY_PRICE_ATOMIC)],
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "track_id": {"type": "string", "const": tid},
+                    "session_id": {"type": "string", "description": "Caller-chosen session id"},
+                },
+                "required": ["track_id", "session_id"],
+            },
+            "outputSchema": {
+                "type": "string",
+                "contentMediaType": "audio/mpeg",
+                "description": "MP3 audio file (single play; no file is kept)",
+            },
+        })
     endpoints = [
         {
             "path": "/stream",
@@ -774,6 +821,18 @@ def x402_manifest() -> dict:
             "payTo": PAY_TO_ADDRESS,
             "mimeType": "audio/mpeg",
             "parameters": ["track_id", "album_id", "session_id"],
+        },
+        {
+            "path": "/play",
+            "method": "GET",
+            "description": "Play one wellness music track once in a session (MP3, $0.05, no ownership)",
+            "price_usd": SESSION_PLAY_PRICE_USD,
+            "maxAmountRequired": str(SESSION_PLAY_PRICE_ATOMIC),
+            "network": network,
+            "asset": asset,
+            "payTo": PAY_TO_ADDRESS,
+            "mimeType": "audio/mpeg",
+            "parameters": ["track_id", "session_id"],
         },
     ]
     return {
@@ -823,7 +882,7 @@ def server_card() -> dict:
     return {
         "$schema": SERVER_CARD_SCHEMA,
         "name": "io.github.lgda-technologies/lgda-autonomic-node",
-        "version": "2.4.0",
+        "version": "2.5.0",
         "title": "LGDA Autonomic Pacing Node",
         "description": "Buy LGDA wellness music with USDC: 27 tracks, x402 payments, signed HRV receipts.",
         "websiteUrl": BASE_URL,
@@ -978,6 +1037,43 @@ def album_purchase(album_id: str, session_id: str) -> dict:
         "verify_session_url": f"{BASE_URL}/verify-session",
         "audio_loaded": {t: audio_path(t).exists() for t in album["track_ids"]},
         "entitlement": "One album payment entitles the buyer to all 3 tracks. Pay once, then present the issued X-LGDA-Session token to /stream for each track.",
+        "disclaimer": DISCLAIMER,
+    }
+
+
+def track_session_play(track_id: str, session_id: str) -> dict:
+    """$0.05 single session play (v2.5.0): one play of one track in
+    the buying agent's session. Not a purchase — no ownership, no
+    file retention, no session token, no signed receipt."""
+    track = track_or_404(track_id)
+    resource = f"{BASE_URL}/play?track_id={track_id}&session_id={session_id}"
+    description = (
+        f"Wellness music session play: {track['title']} (MP3) — "
+        "one play, no ownership"
+    )
+    return {
+        "track_id": track_id,
+        "title": track["title"],
+        "album": track["album"],
+        "price_usd": SESSION_PLAY_PRICE_USD,
+        "price_usdc_atomic": SESSION_PLAY_PRICE_ATOMIC,
+        "play_url": resource,
+        "method": "GET",
+        "x402": {
+            "x402Version": 1,
+            "accepts": [x402_accepts(SESSION_PLAY_PRICE_ATOMIC, resource, description)],
+            "facilitator": X402_FACILITATOR_URL,
+        },
+        "x402_v2": x402_payment_required_v2(
+            SESSION_PLAY_PRICE_ATOMIC, resource, description
+        ),
+        "audio_loaded": audio_path(track_id).exists(),
+        "terms": (
+            "Single session play: one play of the MP3 in the buying "
+            "agent's session only. No ownership, no file retention, "
+            "no redistribution, no session token, no signed receipt. "
+            "To own the track, use purchase_track ($5.99)."
+        ),
         "disclaimer": DISCLAIMER,
     }
 
@@ -1139,6 +1235,118 @@ def stream_post(
         x_session: Optional[str] = Header(default=None, alias="X-LGDA-Session")):
     return _stream(track_id, session_id, album_id, x_payment, payment_signature, x_session)
 
+# ---------------------------------------------------------------- play (paywalled, $0.05, single use)
+
+# Same best-effort x-payment-info shape as STREAM_X_PAYMENT_INFO (see
+# https://www.x402gle.com/agent.md); metadata only, cannot affect the
+# payment flow.
+PLAY_X_PAYMENT_INFO = {
+    "x-payment-info": {
+        "protocols": ["x402"],
+        "price": {
+            "amount": "0.05",
+            "currency": "USD",
+            "atomicAmount": str(SESSION_PLAY_PRICE_ATOMIC),
+            "asset": usdc_asset(X402_NETWORK),
+            "network": caip2_network(X402_NETWORK),
+        },
+        "description": (
+            "One session play $0.05 USDC: one track, one play, no "
+            "ownership, no file retention, no session token, no "
+            "receipt. track_id and session_id are required to "
+            "complete a play; an unpaid request returns HTTP 402 "
+            "with the x402 challenge."
+        ),
+    }
+}
+
+
+def _play_resource(track_id: Optional[str], session_id: Optional[str]) -> str:
+    """Resource URL for a /play 402, built from whichever params are
+    present. Mirrors _stream_resource."""
+    params = []
+    if track_id:
+        params.append(f"track_id={track_id}")
+    if session_id:
+        params.append(f"session_id={session_id}")
+    return f"{BASE_URL}/play" + ("?" + "&".join(params) if params else "")
+
+
+def _play_pricing(track_id: Optional[str]) -> tuple:
+    """(price_atomic, description) for the /play 402. Never raises:
+    unknown or missing ids get the generic description — the 402 is
+    served before any validation (see _play)."""
+    track = TRACKS.get(track_id) if track_id else None
+    if track:
+        return SESSION_PLAY_PRICE_ATOMIC, (
+            f"Wellness music session play: {track['title']} (MP3) — "
+            "one play, no ownership"
+        )
+    return SESSION_PLAY_PRICE_ATOMIC, (
+        "Wellness music session play (MP3) — one play, no ownership"
+    )
+
+
+def _play(track_id: Optional[str], session_id: Optional[str],
+          x_payment: Optional[str], payment_signature: Optional[str]):
+    """$0.05 single session play (v2.5.0).
+
+    Same 402-before-validation rule and verify -> validate -> settle
+    invariant as _stream: an unpaid request gets the x402 challenge
+    no matter what its params look like (bare /play returns 402, not
+    422); a presented payment is verified, then validated (unknown
+    track -> 404, missing params -> 400, unloaded audio -> 503), and
+    settled only if the audio is deliverable. Verification moves no
+    money; only settle does.
+
+    Unlike /stream, a play grants nothing durable: no session token,
+    no PAYMENT-RESPONSE / X-PAYMENT-RESPONSE settlement headers, no
+    signed receipt. The response is the MP3 once, plus headers
+    stating the terms. A session token from a purchase does NOT
+    grant a free play — /play always requires a fresh $0.05 payment.
+    """
+    payment_header = payment_signature or x_payment
+    price, desc = _play_pricing(track_id)
+    resource = _play_resource(track_id, session_id)
+    if not payment_header:
+        return x402_402(price, resource, desc)
+    payment_payload, requirements, version = verify_payment(
+        payment_header, price, resource, desc)
+    if not session_id:
+        raise HTTPException(400, "session_id is required to complete a session play")
+    if not track_id:
+        raise HTTPException(400, "track_id is required to complete a session play")
+    track_or_404(track_id)
+    path = audio_path(track_id)
+    if not path.exists():
+        raise HTTPException(503, "audio file not yet loaded for this track")
+    settle_payment(payment_payload, requirements, version)
+    response = FileResponse(path, media_type="audio/mpeg", filename=f"{track_id}.mp3")
+    response.headers["X-LGDA-Session-Play"] = "single-use"
+    response.headers["X-LGDA-License"] = (
+        "session-play-only; no ownership, no file retention, "
+        "no redistribution, no receipt"
+    )
+    return response
+
+
+@app.get("/play", tags=["play"], openapi_extra=PLAY_X_PAYMENT_INFO)
+def play_get(
+        track_id: Optional[str] = Query(default=None, description="Track slug, e.g. midnight. Required to complete a play; an unpaid request returns 402 without it."),
+        session_id: Optional[str] = Query(default=None, description="Caller-chosen session id. Required to complete a play."),
+        x_payment: Optional[str] = Header(default=None, alias="X-PAYMENT"),
+        payment_signature: Optional[str] = Header(default=None, alias="PAYMENT-SIGNATURE")):
+    return _play(track_id, session_id, x_payment, payment_signature)
+
+
+@app.post("/play", tags=["play"], openapi_extra=PLAY_X_PAYMENT_INFO)
+def play_post(
+        track_id: Optional[str] = Query(default=None, description="Track slug, e.g. midnight. Required to complete a play; an unpaid request returns 402 without it."),
+        session_id: Optional[str] = Query(default=None, description="Caller-chosen session id. Required to complete a play."),
+        x_payment: Optional[str] = Header(default=None, alias="X-PAYMENT"),
+        payment_signature: Optional[str] = Header(default=None, alias="PAYMENT-SIGNATURE")):
+    return _play(track_id, session_id, x_payment, payment_signature)
+
 # ---------------------------------------------------------------- stripe stub
 
 class PayStripeRequest(BaseModel):
@@ -1209,7 +1417,7 @@ def build_receipt(req: VerifySessionRequest) -> dict:
         track_ids = list(ALBUMS[req.album_id]["track_ids"])
     receipt = {
         "node": "lgda-autonomic-node",
-        "version": "2.4.0",
+        "version": "2.5.0",
         "session_id": req.session_id,
         "agent_id": req.agent_id,
         "track_ids": track_ids,
@@ -1298,6 +1506,22 @@ TOOLS = [
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
     },
     {
+        "name": "play_track_session",
+        "title": "Play one track for a single session",
+        "description": "Play a single track once in a session ($0.05 USDC via x402 v2 or v1). One play, no ownership: no file is kept, no session token and no signed receipt are issued. Returns the play URL and x402 payment requirements; GET the URL with a PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1) header to receive the MP3 once. To own the track instead, use purchase_track ($5.99).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "track_id": {"type": "string"},
+                "session_id": {"type": "string", "pattern": "^[A-Za-z0-9._:-]+$", "minLength": 1, "maxLength": 128},
+                "agent_id": {"type": "string", "maxLength": 256},
+            },
+            "required": ["track_id", "session_id"],
+            "additionalProperties": False,
+        },
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
+    },
+    {
         "name": "verify_session",
         "title": "Verify a listening session and get a signed receipt",
         "description": "Submit pre/post HRV segments (RMSSD, IBI, source) for a paid session and receive an Ed25519-signed receipt — the proof of license for the purchase (no receipt, no license). Not paywalled.",
@@ -1325,7 +1549,7 @@ def manifest() -> dict:
         "schema_version": "lgda-mcp-manifest/1",
         "name": "lgda-autonomic-node",
         "title": "LGDA Autonomic Pacing Node",
-        "version": "2.4.0",
+        "version": "2.5.0",
         "description": (
             "Stateless M2M node: x402-paid wellness music (27 tracks, "
             "9 albums) + signed HRV session receipts. The music is the "
@@ -1343,14 +1567,17 @@ def manifest() -> dict:
             "scheme": "exact",
             "tracks": {"price_usdc": "5.99", "amount_atomic": str(TRACK_PRICE_ATOMIC), "unit": "per track"},
             "albums": {"price_usdc": "14.99", "amount_atomic": str(ALBUM_PRICE_ATOMIC), "unit": "per album (3 tracks)"},
+            "session_plays": {"price_usdc": "0.05", "amount_atomic": str(SESSION_PLAY_PRICE_ATOMIC), "unit": "per session play (one track, one play, no ownership)"},
             "networks": [X402_NETWORK],
             "accepts": [
                 x402_accepts(TRACK_PRICE_ATOMIC, f"{BASE_URL}/stream", "Wellness music track (MP3)"),
                 x402_accepts(ALBUM_PRICE_ATOMIC, f"{BASE_URL}/stream", "Wellness music album, 3 tracks (MP3)"),
+                x402_accepts(SESSION_PLAY_PRICE_ATOMIC, f"{BASE_URL}/play", "Wellness music session play (MP3) — one play, no ownership"),
             ],
             "accepts_v2": [
                 x402_accepts_v2(TRACK_PRICE_ATOMIC),
                 x402_accepts_v2(ALBUM_PRICE_ATOMIC),
+                x402_accepts_v2(SESSION_PLAY_PRICE_ATOMIC),
             ],
             "facilitator": X402_FACILITATOR_URL,
             "stripe": {"enabled": False},
@@ -1365,6 +1592,7 @@ def manifest() -> dict:
         "endpoints": {
             "catalog": {"url": f"{BASE_URL}/catalog", "method": "GET"},
             "stream": {"url": f"{BASE_URL}/stream", "methods": ["GET", "POST"], "paywalled": True, "mimeType": "audio/mpeg"},
+            "play": {"url": f"{BASE_URL}/play", "methods": ["GET", "POST"], "paywalled": True, "mimeType": "audio/mpeg"},
             "pay_stripe": {"url": f"{BASE_URL}/pay/stripe", "method": "POST", "enabled": False},
             "verify_session": {"url": f"{BASE_URL}/verify-session", "method": "POST", "paywalled": False},
             "receipt_key": {"url": f"{BASE_URL}/.well-known/receipt-key", "method": "GET"},
@@ -1409,7 +1637,7 @@ async def mcp_rpc(request: Request):
         return _rpc_result(req_id, {
             "protocolVersion": "2025-06-18",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "lgda-autonomic-node", "version": "2.4.0"},
+            "serverInfo": {"name": "lgda-autonomic-node", "version": "2.5.0"},
         })
     if method == "ping":
         return _rpc_result(req_id, {})
@@ -1431,6 +1659,8 @@ async def mcp_rpc(request: Request):
                 return _rpc_result(req_id, _tool_text(track_purchase(args["track_id"], args["session_id"])))
             if name == "purchase_album":
                 return _rpc_result(req_id, _tool_text(album_purchase(args["album_id"], args["session_id"])))
+            if name == "play_track_session":
+                return _rpc_result(req_id, _tool_text(track_session_play(args["track_id"], args["session_id"])))
             if name == "verify_session":
                 req = VerifySessionRequest(**args)
                 return _rpc_result(req_id, _tool_text(build_receipt(req)))

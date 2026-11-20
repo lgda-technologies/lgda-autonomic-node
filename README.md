@@ -5,7 +5,8 @@
 Machine-readable front door for the **LGDA Technologies wellness music
 catalog** (human storefront: https://lgda-technologies.base44.app).
 AI agents discover this node via the `/mcp` manifest, pay per track or
-album with x402 (USDC), and receive the real MP3 — no human in the loop.
+album with x402 (USDC) and receive the real MP3 — or play one track
+once in a session for $0.05 (no ownership) — no human in the loop.
 
 **Try it live:** the [LGDA Room Prototype](https://lgda-technologies.github.io/lgda-room/)
 runs a free session in your browser — camera in, music and light out —
@@ -22,8 +23,8 @@ catalog. It never generates a synthetic tone.
 | | v1 (live at lgda-node.fly.dev) | v2 (this repo) |
 |---|---|---|
 | Product | One tool generating a synthetic paced-breathing tone | Real catalog: 27 tracks, 9 albums |
-| Price | $0.05 per stream | $5.99/track, $14.99/album |
-| Tools | `stream_autonomic_frequency` only | `list_catalog`, `get_track_evidence`, `purchase_track`, `purchase_album`, `verify_session` |
+| Price | $0.05 per stream | $5.99/track, $14.99/album, $0.05/session play |
+| Tools | `stream_autonomic_frequency` only | `list_catalog`, `get_track_evidence`, `purchase_track`, `purchase_album`, `play_track_session`, `verify_session` |
 | Audio | Generated WAV tone | Real MP3 from `./audio/`; missing file → 503, never a tone |
 | `GET /` | `{"detail": "Not Found"}` | Real homepage explaining the node |
 | Evidence | None | Per-track History session data (RMSSD/HR) in the catalog |
@@ -94,6 +95,11 @@ rows shown — the header figures are recorded verbatim in
    `X-PAYMENT-RESPONSE` settlement header.
 5. `POST /verify-session` with pre/post HRV segments — signed receipt.
 
+Or, for a single session play instead of ownership:
+`tools/call play_track_session` (`track_id`, `session_id`) — $0.05 —
+then `GET /play?track_id=...&session_id=...` with the payment header.
+One play, no file kept, no token, no receipt.
+
 ### x402 versions (dual-serve, v2.2.0)
 
 The node speaks x402 v1 **and** v2. The 402 carries the canonical v2
@@ -132,6 +138,16 @@ the SEP-2127 server card (`/mcp/server-card`) + AI Catalog
 (`/.well-known/ai-catalog.json`, `/.well-known/ard.json`), MCP tool
 annotations, and OpenAPI `x-payment-info` / `x-guidance` for x402gle.
 
+v2.5.0 adds a $0.05 per-session play: `GET /play` streams one track
+once for 50000 atomic USDC, with no ownership, no file retention, no
+session token and no signed receipt. It is a separate product from
+the $5.99 track / $14.99 album purchase (ownership). Same
+402-before-validation rule and the same verify → validate → settle
+invariant as `/stream`; the 402 carries the per-network EIP-712
+domain name. The `/.well-known/x402` manifest lists the 27 play
+resources alongside the 36 purchase resources, and the MCP tool
+`play_track_session` returns the play URL + x402 requirements.
+
 ### Entitlement model
 
 - A track payment ($5.99) entitles the buyer to that one track.
@@ -139,6 +155,11 @@ annotations, and OpenAPI `x-payment-info` / `x-guidance` for x402gle.
   album. Pay once (resource `/stream?album_id=...`), then present the
   issued `X-LGDA-Session` token to `/stream` for each track — the token
   lists the entitled `track_ids` and is Ed25519-signed by the node.
+- A session play ($0.05) is NOT a purchase: it streams one track once,
+  in the buying agent's session only. No ownership, no file retention,
+  no redistribution, no session token, no receipt. A session token
+  from a purchase does not grant a free play — `/play` always requires
+  a fresh $0.05 payment.
 - `/stream` checks, in order: no valid payment or session token →
   402 with the x402 `accepts` payload (regardless of params — bare
   `/stream` returns 402, never 422); payment presented → verify via
@@ -161,6 +182,11 @@ Ed25519-signed receipt as proof of license — no receipt, no license.
   or alter it; claim it as their own; use it in advertising, film,
   games, public broadcast, or any commercial production; or train a
   model on it. Those need a separate license.
+- **Session plays grant no license at all:** a $0.05 play is one play
+  of one track in the buying agent's session only — no ownership, no
+  file retention, no redistribution, no receipt. Keeping or reusing
+  the audio beyond the paid session needs a purchase ($5.99 track /
+  $14.99 album).
 - **Wellness only:** the music is wellness music, not a medical device
   and not clinically proven treatment.
 
@@ -173,9 +199,10 @@ Ed25519-signed receipt as proof of license — no receipt, no license.
 | `GET /catalog` | Full catalog + evidence |
 | `GET /catalog/{track_id}` | One track + its sessions |
 | `GET /albums`, `GET /albums/{album_id}` | Album browsing |
-| `GET /mcp` | MCP manifest (v2.4.0, 5 tools) |
+| `GET /mcp` | MCP manifest (v2.5.0, 6 tools) |
 | `POST /mcp` | JSON-RPC: `initialize`, `ping`, `tools/list`, `tools/call` |
 | `GET\|POST /stream` | x402-paywalled MP3 (see above) |
+| `GET\|POST /play` | $0.05 single session play: one track, one play, no ownership, no token, no receipt |
 | `POST /verify-session` | Signed HRV receipt (v1-compatible shape + optional `track_id`/`album_id`) |
 | `POST /pay/stripe` | Stub: `{"enabled": false}` until Stripe is implemented |
 | `GET /.well-known/receipt-key` | Ed25519 public key (JWK) |
@@ -255,7 +282,7 @@ pip install -r requirements-dev.txt
 python -m pytest tests/ -v
 ```
 
-31 tests cover: catalog loads (27 tracks / 9 albums), pricing math,
+43 tests cover: catalog loads (27 tracks / 9 albums), pricing math,
 manifest tools, evidence aggregates recomputed from `sessions.json`,
 homepage, health, `/stream` 402-before-validation (bare /stream →
 402; unpaid unknown track / missing audio → 402) + session-token
@@ -267,7 +294,12 @@ calibrated" in any agent-facing response), the v1/v2 dual-serve 402
 and per-network EIP-712 domain names, the bazaar extension, the
 `/.well-known/x402` manifest, `x402-trust.txt`, the server card +
 AI Catalog, tool titles/annotations, and the OpenAPI
-`x-guidance` / `x-payment-info` blocks.
+`x-guidance` / `x-payment-info` blocks — plus the same coverage for
+the $0.05 `/play` endpoint (bare /play → 402, $0.05 402 amount and
+per-network domain name, the no-settle invariant, v1 + v2 paid
+plays with no token/receipt headers, the bazaar extension, the 27
+play resources in the manifest, the `play_track_session` MCP tool,
+and the `/play` OpenAPI `x-payment-info`).
 
 ## Deploy (Fly.io)
 
