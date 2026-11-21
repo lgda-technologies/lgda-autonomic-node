@@ -2,6 +2,7 @@
 
 [![LGDA Autonomic Pacing Node MCP connector](https://glama.ai/mcp/connectors/io.github.lgda-technologies/lgda-autonomic-node/badges/score.svg)](https://glama.ai/mcp/connectors/io.github.lgda-technologies/lgda-autonomic-node)
 [![LGDA Autonomic Node MCP server](https://mcprush.com/badge/lgda-autonomic-node-mcp/card.svg)](https://mcprush.com/to/lgda-autonomic-node-mcp?ref=badge)
+[![M8ven Score](https://m8ven.ai/badge/mcp/lgda-technologies-lgda-autonomic-node-wy8zzu?v=ae3cd0e4cfbf19ee44abbc824fb89acb)](https://m8ven.ai/mcp/lgda-technologies-lgda-autonomic-node-wy8zzu?s=readme)
 
 Machine-readable front door for the **LGDA Technologies wellness music
 catalog** (human storefront: https://lgda-technologies.base44.app).
