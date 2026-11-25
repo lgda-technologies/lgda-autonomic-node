@@ -722,7 +722,7 @@ def x402_manifest() -> dict:
             "resource": f"{BASE_URL}/stream?track_id={tid}&session_id=your-session-id",
             "type": "http",
             "method": "GET",
-            "description": f"Wellness music track: {track['title']} ({track['album']}) — MP3",
+            "description": f"Wellness music track for calm/focus sessions: {track['title']} ({track['album']}) — MP3, HRV session evidence",
             "accepts": [x402_accepts_v2(TRACK_PRICE_ATOMIC)],
             "inputSchema": {
                 "type": "object",
@@ -748,7 +748,7 @@ def x402_manifest() -> dict:
             "type": "http",
             "method": "GET",
             "description": (
-                f"Wellness music album: {album['title']} (3 MP3 tracks) — "
+                f"Wellness music album for calm/focus sessions: {album['title']} (3 MP3 tracks, HRV session evidence) — "
                 "one $14.99 payment entitles all 3 tracks; the first track "
                 "is served immediately and the X-LGDA-Session token unlocks "
                 "the other two"
@@ -779,7 +779,7 @@ def x402_manifest() -> dict:
             "type": "http",
             "method": "GET",
             "description": (
-                f"Wellness music session play: {track['title']} "
+                f"Wellness music session play for calm/focus listening: {track['title']} "
                 f"({track['album']}) — one $0.05 play, MP3, no ownership"
             ),
             "accepts": [x402_accepts_v2(SESSION_PLAY_PRICE_ATOMIC)],
@@ -801,7 +801,7 @@ def x402_manifest() -> dict:
         {
             "path": "/stream",
             "method": "GET",
-            "description": "Buy one wellness music track (MP3)",
+            "description": "Buy one wellness music track for calm/focus sessions (MP3, HRV session evidence)",
             "price_usd": TRACK_PRICE_USD,
             "maxAmountRequired": str(TRACK_PRICE_ATOMIC),
             "network": network,
@@ -813,7 +813,7 @@ def x402_manifest() -> dict:
         {
             "path": "/stream",
             "method": "GET",
-            "description": "Buy one wellness music album (3 MP3 tracks, $14.99)",
+            "description": "Buy one wellness music album for calm/focus sessions (3 MP3 tracks, $14.99, HRV session evidence)",
             "price_usd": ALBUM_PRICE_USD,
             "maxAmountRequired": str(ALBUM_PRICE_ATOMIC),
             "network": network,
@@ -825,7 +825,7 @@ def x402_manifest() -> dict:
         {
             "path": "/play",
             "method": "GET",
-            "description": "Play one wellness music track once in a session (MP3, $0.05, no ownership)",
+            "description": "Play one wellness music track once in a calm/focus session (MP3, $0.05, no ownership)",
             "price_usd": SESSION_PLAY_PRICE_USD,
             "maxAmountRequired": str(SESSION_PLAY_PRICE_ATOMIC),
             "network": network,
@@ -840,7 +840,7 @@ def x402_manifest() -> dict:
         "name": "LGDA Autonomic Pacing Node",
         "serviceName": "LGDA Music",
         "description": (
-            "x402-paywalled wellness music catalog (27 tracks, 9 albums). "
+            "x402-paywalled wellness music catalog for calm, focus, and wind-down listening sessions (27 tracks, 9 albums), with per-track HRV/RMSSD session evidence. "
             + DISCLAIMER
         ),
         "network": network,
@@ -884,7 +884,7 @@ def server_card() -> dict:
         "name": "io.github.lgda-technologies/lgda-autonomic-node",
         "version": "2.5.0",
         "title": "LGDA Autonomic Pacing Node",
-        "description": "Buy LGDA wellness music with USDC: 27 tracks, x402 payments, signed HRV receipts.",
+        "description": "Calm/focus wellness music with USDC: 27 tracks, x402, signed HRV receipts.",
         "websiteUrl": BASE_URL,
         "remotes": [
             {
@@ -959,6 +959,19 @@ def well_known_ai_catalog():
 
 @app.get("/.well-known/ard.json", tags=["discovery"])
 def well_known_ard():
+    return _ai_catalog_response()
+
+
+@app.get("/.well-known/mcp/catalog.json", tags=["discovery"])
+def well_known_mcp_catalog():
+    """SEP-2127 draft catalog path: same manifest as ai-catalog."""
+    return _ai_catalog_response()
+
+
+@app.get("/.well-known/mcp.json", tags=["discovery"])
+def well_known_mcp_json():
+    """Community-convention MCP discovery path (Cloudflare-style):
+    same manifest as ai-catalog."""
     return _ai_catalog_response()
 
 # ---------------------------------------------------------------- catalog
@@ -1048,7 +1061,7 @@ def track_session_play(track_id: str, session_id: str) -> dict:
     track = track_or_404(track_id)
     resource = f"{BASE_URL}/play?track_id={track_id}&session_id={session_id}"
     description = (
-        f"Wellness music session play: {track['title']} (MP3) — "
+        f"Wellness music session play for calm/focus listening: {track['title']} (MP3) — "
         "one play, no ownership"
     )
     return {
@@ -1104,12 +1117,12 @@ def _stream_pricing(track_id: Optional[str],
     if album_id:
         album = ALBUMS.get(album_id)
         if album:
-            return ALBUM_PRICE_ATOMIC, f"Wellness music album: {album['title']} (3 MP3 tracks)"
-        return ALBUM_PRICE_ATOMIC, "Wellness music album (3 MP3 tracks)"
+            return ALBUM_PRICE_ATOMIC, f"Wellness music album for calm/focus sessions: {album['title']} (3 MP3 tracks)"
+        return ALBUM_PRICE_ATOMIC, "Wellness music album for calm/focus sessions (3 MP3 tracks)"
     track = TRACKS.get(track_id) if track_id else None
     if track:
-        return TRACK_PRICE_ATOMIC, f"Wellness music track: {track['title']} (MP3)"
-    return TRACK_PRICE_ATOMIC, "Wellness music track (MP3)"
+        return TRACK_PRICE_ATOMIC, f"Wellness music track for calm/focus sessions: {track['title']} (MP3)"
+    return TRACK_PRICE_ATOMIC, "Wellness music track for calm/focus sessions (MP3)"
 
 
 # x402gle's discovery prefers OpenAPI with an x-payment-info block on
@@ -1279,11 +1292,11 @@ def _play_pricing(track_id: Optional[str]) -> tuple:
     track = TRACKS.get(track_id) if track_id else None
     if track:
         return SESSION_PLAY_PRICE_ATOMIC, (
-            f"Wellness music session play: {track['title']} (MP3) — "
+            f"Wellness music session play for calm/focus listening: {track['title']} (MP3) — "
             "one play, no ownership"
         )
     return SESSION_PLAY_PRICE_ATOMIC, (
-        "Wellness music session play (MP3) — one play, no ownership"
+        "Wellness music session play for calm/focus listening (MP3) — one play, no ownership"
     )
 
 
@@ -1571,8 +1584,8 @@ def manifest() -> dict:
         "title": "LGDA Autonomic Pacing Node",
         "version": "2.5.0",
         "description": (
-            "Stateless M2M node: x402-paid wellness music (27 tracks, "
-            "9 albums) + signed HRV session receipts. The music is the "
+            "Stateless M2M node: x402-paid wellness music for calm, focus, "
+            "and wind-down sessions (27 tracks, 9 albums) + signed HRV/RMSSD session receipts. The music is the "
             "product; each track carries its History session evidence."
         ),
         "mcp": {
@@ -1590,9 +1603,9 @@ def manifest() -> dict:
             "session_plays": {"price_usdc": "0.05", "amount_atomic": str(SESSION_PLAY_PRICE_ATOMIC), "unit": "per session play (one track, one play, no ownership)"},
             "networks": [X402_NETWORK],
             "accepts": [
-                x402_accepts(TRACK_PRICE_ATOMIC, f"{BASE_URL}/stream", "Wellness music track (MP3)"),
-                x402_accepts(ALBUM_PRICE_ATOMIC, f"{BASE_URL}/stream", "Wellness music album, 3 tracks (MP3)"),
-                x402_accepts(SESSION_PLAY_PRICE_ATOMIC, f"{BASE_URL}/play", "Wellness music session play (MP3) — one play, no ownership"),
+                x402_accepts(TRACK_PRICE_ATOMIC, f"{BASE_URL}/stream", "Wellness music track for calm/focus sessions (MP3)"),
+                x402_accepts(ALBUM_PRICE_ATOMIC, f"{BASE_URL}/stream", "Wellness music album for calm/focus sessions, 3 tracks (MP3)"),
+                x402_accepts(SESSION_PLAY_PRICE_ATOMIC, f"{BASE_URL}/play", "Wellness music session play for calm/focus listening (MP3) — one play, no ownership"),
             ],
             "accepts_v2": [
                 x402_accepts_v2(TRACK_PRICE_ATOMIC),

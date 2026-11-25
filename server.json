@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "description": "Buy LGDA wellness music with USDC: 27 tracks, x402 payments, signed HRV receipts.",
+  "description": "Calm/focus wellness music with USDC: 27 tracks, x402, signed HRV receipts.",
   "name": "io.github.lgda-technologies/lgda-autonomic-node",
   "remotes": [
     {

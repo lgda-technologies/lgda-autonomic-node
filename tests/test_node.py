@@ -622,7 +622,8 @@ def test_server_card_and_ai_catalog():
     assert r2.status_code == 200
     assert r2.json() == card
     # Both catalog paths serve the identical manifest.
-    for path in ["/.well-known/ai-catalog.json", "/.well-known/ard.json"]:
+    for path in ["/.well-known/ai-catalog.json", "/.well-known/ard.json",
+                 "/.well-known/mcp/catalog.json", "/.well-known/mcp.json"]:
         rc = client.get(path)
         assert rc.status_code == 200, path
         assert rc.headers["content-type"].startswith("application/ai-catalog+json")
