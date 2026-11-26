@@ -1293,11 +1293,11 @@ def _play_pricing(track_id: Optional[str]) -> tuple:
     track = TRACKS.get(track_id) if track_id else None
     if track:
         return SESSION_PLAY_PRICE_ATOMIC, (
-            f"Wellness music session play for calm/focus listening: {track['title']} (MP3) — "
+            f"Calm music session play for calm/focus listening: {track['title']} (MP3) — "
             "one play, no ownership"
         )
     return SESSION_PLAY_PRICE_ATOMIC, (
-        "Wellness music session play for calm/focus listening (MP3) — one play, no ownership"
+        "Calm music session play for calm/focus listening (MP3) — one play, no ownership"
     )
 
 
