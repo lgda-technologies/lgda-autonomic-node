@@ -79,12 +79,16 @@ def test_manifest_tools_exist():
         "purchase_album",
         "play_track_session",
         "verify_session",
+        "recommend_track",
     }
     # v1's synthetic-tone tool must be gone.
     assert "stream_autonomic_frequency" not in names
     assert m["pricing"]["tracks"]["amount_atomic"] == "5990000"
     assert m["pricing"]["albums"]["amount_atomic"] == "14990000"
     assert m["pricing"]["session_plays"]["amount_atomic"] == "50000"
+    assert m["pricing"]["measurement_verification"]["amount_atomic"] == "50000"
+    assert m["endpoints"]["recommend"]["paywalled"] is False
+    assert m["endpoints"]["measure_verify"]["paywalled"] is True
     assert m["endpoints"]["play"]["url"] == "https://lgda-music.fly.dev/play"
 
 
@@ -218,7 +222,7 @@ def test_verify_session_receipt_signature_verifies():
 def test_mcp_jsonrpc_tools_list_and_call():
     r = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
     assert r.status_code == 200
-    assert len(r.json()["result"]["tools"]) == 6
+    assert len(r.json()["result"]["tools"]) == 7
     r = client.post("/mcp", json={
         "jsonrpc": "2.0", "id": 2, "method": "tools/call",
         "params": {"name": "get_track_evidence", "arguments": {"track_id": "midnight"}},
@@ -568,7 +572,7 @@ def test_well_known_x402_manifest():
         assert m["asset"] == "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
         assert m["payTo"] == "0x8da12fca05e38aeda66f112fcf2ef6036c7bd666"
         # 27 track resources + 9 album resources + 27 session-play resources.
-        assert len(m["resources"]) == 63, path
+        assert len(m["resources"]) == 64, path
         track = next(x for x in m["resources"] if "track_id=midnight" in x["resource"] and "/stream?" in x["resource"])
         assert track["accepts"][0]["amount"] == "5990000"
         assert track["inputSchema"]["required"] == ["track_id", "session_id"]
@@ -576,7 +580,7 @@ def test_well_known_x402_manifest():
         album = next(x for x in m["resources"] if "album_id=porter-ave" in x["resource"])
         assert album["accepts"][0]["amount"] == "14990000"
         assert "track_id=" in album["resource"]  # album pays on a track URL
-        assert len(m["endpoints"]) == 3
+        assert len(m["endpoints"]) == 4
         assert {e["price_usd"] for e in m["endpoints"]} == {5.99, 14.99, 0.05}
 
 
@@ -643,7 +647,7 @@ def test_mcp_tools_have_titles_and_annotations():
     r = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
     assert r.status_code == 200
     tools = r.json()["result"]["tools"]
-    assert len(tools) == 6
+    assert len(tools) == 7
     by_name = {t["name"]: t for t in tools}
     for name, tool in by_name.items():
         assert tool["title"].strip(), name
@@ -937,3 +941,64 @@ def test_openapi_play_x_payment_info():
         params = {p["name"]: p for p in op["parameters"]}
         assert params["track_id"]["required"] is False
         assert params["session_id"]["required"] is False
+
+
+def test_recommend_free_state_to_track():
+    r = client.get("/recommend", params={"state": "focus", "limit": 3})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["state"] == "focus"
+    assert data["privacy"]["payment_required"] is False
+    assert data["privacy"]["biometric_input_required"] is False
+    assert "does not prove" in data["evidence_note"]
+    assert data["recommendations"][0]["track_id"] == "higher-ground"
+    assert data["recommendations"][0]["play"]["price_usd"] == 0.05
+    assert data["recommendations"][0]["purchase"]["price_usd"] == 5.99
+    r = client.get("/recommend", params={"state": "wind-down", "limit": 2, "exclude": "higher-ground"})
+    assert r.status_code == 200
+    assert r.json()["state"] == "wind_down"
+    assert all(x["track_id"] != "higher-ground" for x in r.json()["recommendations"])
+    assert client.get("/recommend", params={"state": "bogus"}).status_code == 400
+
+
+def test_mcp_recommend_track_tool():
+    r = client.post("/mcp", json={
+        "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+        "params": {"name": "recommend_track", "arguments": {"state": "calm", "limit": 2}},
+    })
+    assert r.status_code == 200
+    rec = json.loads(r.json()["result"]["content"][0]["text"])
+    assert rec["state"] == "calm"
+    assert len(rec["recommendations"]) == 2
+    assert rec["recommendations"][0]["evidence_status"] == "history_sessions"
+
+
+def test_measure_verify_unpaid_returns_402_before_validation():
+    r = client.post("/measure/verify", json={})
+    assert r.status_code == 402
+    assert r.json()["accepts"][0]["maxAmountRequired"] == "50000"
+    m = client.get("/.well-known/x402").json()
+    measure = [x for x in m["resources"] if x["resource"].endswith("/measure/verify")]
+    assert len(measure) == 1
+    assert measure[0]["accepts"][0]["amount"] == "50000"
+    assert "no license" in measure[0]["description"]
+
+
+def test_measure_verify_paid_returns_signed_outcome(monkeypatch):
+    monkeypatch.setattr(main_module, "verify_payment", lambda *a, **k: ({}, {}, 2))
+    monkeypatch.setattr(main_module, "settle_payment", lambda *a, **k: {"transaction": "0xtest", "payer": "0xpayer"})
+    payload = {
+        "session_id": "s-measure",
+        "agent_id": "agent-1",
+        "track_id": "higher-ground",
+        "pre": {"rmssd_ms": 80.0, "source": "rppg"},
+        "post": {"rmssd_ms": 95.0, "source": "rppg"},
+    }
+    r = client.post("/measure/verify", json=payload, headers={"PAYMENT-SIGNATURE": "test"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["outcome"]["rmssd_delta_ms"] == 15.0
+    assert body["outcome"]["license_granted"] is False
+    assert body["outcome"]["proof_scope"] == "outcome_only_not_license"
+    assert body["outcome"]["payment_tx"] == "0xtest"
+    assert r.headers["PAYMENT-RESPONSE"]

@@ -102,6 +102,45 @@ Or, for a single session play instead of ownership:
 then `GET /play?track_id=...&session_id=...` with the payment header.
 One play, no file kept, no token, no receipt.
 
+### Fast path for wellness, focus, and smart-space agents
+
+Built for wellness bots, focus-timer agents, and smart-space
+controllers that need a track choice in one call, not catalog browsing:
+
+1. `GET /recommend?state=calm` (or MCP `recommend_track`) — free and
+   stateless. States: `calm`, `focus`, `wind_down`, `recovery`,
+   `session`. Returns evidence-ranked tracks with $0.05 play URLs and
+   $5.99 ownership URLs. No payment and no biometric input required.
+2. `GET /play?track_id=...&session_id=...` with x402 payment — $0.05
+   session test. One play, no ownership, no license.
+3. `POST /measure/verify` with pre/post RMSSD and x402 payment —
+   $0.05 measurement verification. Returns an Ed25519-signed outcome
+   receipt with `license_granted: false`. Outcome proof only.
+4. Buy ownership through `/stream` ($5.99 track / $14.99 album) when
+   the session earns it. The signed purchase receipt is the license.
+
+Recommendation ranking is transparent and observational. History
+evidence is one RMSSD/HR reading during a track, with no before/after
+and no duration in the source rows, so `/recommend` ranks evidence
+coverage and observed session averages only. It does not claim a
+track caused a state. Tracks with no valid History sessions rank after
+evidence tracks and report `evidence_status: "none"`.
+
+Latency measured from the operator VM against the live node on
+2026-11-25, five requests per endpoint, median total time:
+`/healthz` 0.374s, `/catalog` 0.549s, `/play` 402 challenge 0.410s,
+`/mcp` manifest 0.522s, `/citizens/metrics` 0.450s. All five runs
+returned the expected status for each endpoint.
+
+Privacy by endpoint: `/recommend` stores nothing and requires no
+biometric input. `/verify-session` and `/measure/verify` process the
+pre/post segments an agent submits to sign a receipt; the node code
+does not write that telemetry to disk. The public room summary and
+downloadable log live in the user's browser. The citizen ledger is
+separate: it stores citizen `agent_id`, role, credit balance, work
+evidence hashes (not raw evidence), and credit-play records so credits
+can be earned, spent, and counted separately from external sales.
+
 ### x402 versions (dual-serve, v2.2.0)
 
 The node speaks x402 v1 **and** v2. The 402 carries the canonical v2
@@ -201,11 +240,13 @@ Ed25519-signed receipt as proof of license — no receipt, no license.
 | `GET /catalog` | Full catalog + evidence |
 | `GET /catalog/{track_id}` | One track + its sessions |
 | `GET /albums`, `GET /albums/{album_id}` | Album browsing |
-| `GET /mcp` | MCP manifest (v2.5.0, 6 tools) |
+| `GET /recommend` | Free state-to-track recommendation (`calm`, `focus`, `wind_down`, `recovery`, `session`) |
+| `GET /mcp` | MCP manifest (v2.5.0, 7 tools) |
 | `POST /mcp` | JSON-RPC: `initialize`, `ping`, `tools/list`, `tools/call` |
 | `GET\|POST /stream` | x402-paywalled MP3 (see above) |
 | `GET\|POST /play` | $0.05 single session play: one track, one play, no ownership, no token, no receipt |
 | `POST /verify-session` | Signed HRV receipt (v1-compatible shape + optional `track_id`/`album_id`) |
+| `POST /measure/verify` | $0.05 measurement verification: signed outcome receipt, `license_granted: false` |
 | `POST /pay/stripe` | Stub: `{"enabled": false}` until Stripe is implemented |
 | `GET /.well-known/receipt-key` | Ed25519 public key (JWK) |
 | `GET /.well-known/x402`, `/.well-known/x402.json` | x402 discovery manifest (paid endpoints) |

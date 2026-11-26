@@ -152,6 +152,10 @@ TRACK_PRICE_ATOMIC = 5_990_000  # $5.99, 6-decimal USDC
 ALBUM_PRICE_ATOMIC = 14_990_000  # $14.99, 6-decimal USDC
 SESSION_PLAY_PRICE_USD = 0.05
 SESSION_PLAY_PRICE_ATOMIC = 50_000  # $0.05, 6-decimal USDC
+# Paid measurement verification uses the established $0.05 micro price:
+# one signed HRV/RMSSD outcome receipt, no license granted.
+MEASUREMENT_VERIFY_PRICE_USD = SESSION_PLAY_PRICE_USD
+MEASUREMENT_VERIFY_PRICE_ATOMIC = SESSION_PLAY_PRICE_ATOMIC
 SESSION_TOKEN_TTL_S = 24 * 3600
 
 # ---------------------------------------------------------------- catalog
@@ -639,6 +643,7 @@ once in a session for $0.05 (no ownership).</p>
 instead.)</p>
 <ul>
 <li><a href="/catalog">/catalog</a> — full catalog with per-track session evidence</li>
+<li><a href="/recommend?state=calm">/recommend</a> — free state-to-track recommendation for wellness, focus, and smart-space agents</li>
 <li><a href="/mcp">/mcp</a> — MCP manifest: tools, pricing, endpoints</li>
 <li><a href="/play">/play</a> — $0.05 single session play (one track, one play, no ownership)</li>
 <li><a href="/docs">/docs</a> — OpenAPI docs</li>
@@ -798,6 +803,32 @@ def x402_manifest() -> dict:
                 "description": "MP3 audio file (single play; no file is kept)",
             },
         })
+    resources.append({
+        "resource": f"{BASE_URL}/measure/verify",
+        "type": "http",
+        "method": "POST",
+        "description": (
+            "Measurement verification for calm/focus biometric sessions: "
+            "submit pre/post RMSSD and receive a signed outcome receipt "
+            "($0.05, outcome proof only, no license)"
+        ),
+        "accepts": [x402_accepts_v2(MEASUREMENT_VERIFY_PRICE_ATOMIC)],
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "agent_id": {"type": "string"},
+                "track_id": {"type": "string"},
+                "pre": {"type": "object", "properties": {"rmssd_ms": {"type": "number"}}},
+                "post": {"type": "object", "properties": {"rmssd_ms": {"type": "number"}}},
+            },
+            "required": ["session_id", "agent_id", "pre", "post"],
+        },
+        "outputSchema": {
+            "type": "object",
+            "description": "Ed25519-signed measurement outcome receipt; license_granted false",
+        },
+    })
     endpoints = [
         {
             "path": "/stream",
@@ -834,6 +865,18 @@ def x402_manifest() -> dict:
             "payTo": PAY_TO_ADDRESS,
             "mimeType": "audio/mpeg",
             "parameters": ["track_id", "session_id"],
+        },
+        {
+            "path": "/measure/verify",
+            "method": "POST",
+            "description": "Verify one biometric session measurement and receive a signed outcome receipt ($0.05, no license)",
+            "price_usd": MEASUREMENT_VERIFY_PRICE_USD,
+            "maxAmountRequired": str(MEASUREMENT_VERIFY_PRICE_ATOMIC),
+            "network": network,
+            "asset": asset,
+            "payTo": PAY_TO_ADDRESS,
+            "mimeType": "application/json",
+            "parameters": ["session_id", "agent_id", "track_id", "pre", "post"],
         },
     ]
     return {
@@ -998,6 +1041,132 @@ def get_albums():
 def get_album(album_id: str):
     album = album_or_404(album_id)
     return {**album, "tracks": [TRACKS[t] for t in album["track_ids"]]}
+
+# ---------------------------------------------------------------- recommend (free, stateless)
+
+RECOMMEND_STATES = {"calm", "focus", "wind_down", "recovery", "session"}
+
+
+def _recommend_score(track: dict, state: str) -> float:
+    """Transparent observational ranking score.
+
+    History evidence is a single RMSSD/HR reading during a track, with
+    no before/after and no duration. The score therefore ranks
+    evidence coverage and observed session averages only; it does not
+    claim a track caused a state. Small samples are shrunk by the
+    valid/(valid+2) confidence factor.
+    """
+    evidence = track.get("evidence") or {}
+    valid = evidence.get("valid_sessions") or 0
+    if not valid:
+        return -1_000_000.0
+    median_rmssd = evidence.get("median_rmssd_ms") or 0.0
+    mean_hr = evidence.get("mean_heart_rate_bpm") or 0.0
+    confidence = valid / (valid + 2)
+    if state in {"calm", "wind_down", "recovery"}:
+        raw = (median_rmssd / 10.0) - mean_hr
+    else:  # focus / session: evidence coverage first, then observed HRV
+        raw = (valid * 20.0) + (median_rmssd / 20.0) - abs(mean_hr - 75.0)
+    return round(confidence * raw, 2)
+
+
+def recommend_tracks(state: str = "session", limit: int = 3,
+                     exclude: Optional[list] = None) -> dict:
+    normalized = (state or "session").strip().lower().replace("-", "_").replace(" ", "_")
+    if normalized not in RECOMMEND_STATES:
+        raise HTTPException(
+            400,
+            "Unknown state. Use one of: calm, focus, wind_down, recovery, session",
+        )
+    excluded = {str(x).strip() for x in (exclude or []) if str(x).strip()}
+    candidates = [t for t in CATALOG["tracks"] if t["track_id"] not in excluded]
+    evidence_tracks = [
+        t for t in candidates if (t.get("evidence") or {}).get("valid_sessions")
+    ]
+    no_evidence_tracks = [
+        t for t in candidates if not (t.get("evidence") or {}).get("valid_sessions")
+    ]
+    evidence_tracks.sort(
+        key=lambda t: (-_recommend_score(t, normalized), t["title"].lower())
+    )
+    no_evidence_tracks.sort(key=lambda t: t["title"].lower())
+    ranked = (evidence_tracks + no_evidence_tracks)[:limit]
+
+    recommendations = []
+    for rank, track in enumerate(ranked, start=1):
+        evidence = track.get("evidence") or {}
+        valid = evidence.get("valid_sessions") or 0
+        recommendations.append({
+            "rank": rank,
+            "track_id": track["track_id"],
+            "title": track["title"],
+            "album": track["album"],
+            "album_id": track["album_id"],
+            "evidence_status": "history_sessions" if valid else "none",
+            "evidence": {
+                "valid_sessions": valid,
+                "session_count": evidence.get("session_count") or 0,
+                "mean_rmssd_ms": evidence.get("mean_rmssd_ms"),
+                "median_rmssd_ms": evidence.get("median_rmssd_ms"),
+                "mean_heart_rate_bpm": evidence.get("mean_heart_rate_bpm"),
+            },
+            "score": _recommend_score(track, normalized) if valid else None,
+            "play": {
+                "price_usd": SESSION_PLAY_PRICE_USD,
+                "url": f"{BASE_URL}/play?track_id={track['track_id']}&session_id=your-session-id",
+                "terms": "One session play, no ownership, no license.",
+            },
+            "purchase": {
+                "price_usd": TRACK_PRICE_USD,
+                "url": f"{BASE_URL}/stream?track_id={track['track_id']}&session_id=your-session-id",
+                "album_price_usd": ALBUM_PRICE_USD,
+                "album_url": (
+                    f"{BASE_URL}/stream?track_id={track['track_id']}"
+                    f"&album_id={track['album_id']}&session_id=your-session-id"
+                ),
+            },
+            "room_url": "https://lgda-technologies.github.io/lgda-room/",
+        })
+
+    return {
+        "state": normalized,
+        "recommendation_basis": (
+            "Evidence-ranked candidates for a paid session test. Calm, "
+            "wind_down, and recovery rank observed lower heart rate with "
+            "higher median RMSSD, shrunk for small samples. Focus and "
+            "session rank evidence coverage first. Tracks with no valid "
+            "History sessions rank after evidence tracks and say so."
+        ),
+        "evidence_note": (
+            "History evidence is observational: one RMSSD/HR reading "
+            "during a track, no before/after and no duration in the "
+            "source rows. It does not prove a track caused a state. "
+            "Test with a $0.05 play, then verify the session outcome."
+        ),
+        "recommendations": recommendations,
+        "next_steps": {
+            "play": "GET the recommendation play URL with x402 payment ($0.05).",
+            "verify_measurement": f"POST {BASE_URL}/measure/verify with pre/post RMSSD ($0.05) for a signed outcome receipt, license_granted false.",
+            "own": "Buy the track ($5.99) or album ($14.99) through /stream for ownership and the signed license receipt.",
+            "citizens": "Agents may register at POST /citizens/register and earn work credits for verifiable work.",
+        },
+        "privacy": {
+            "stateless": True,
+            "payment_required": False,
+            "biometric_input_required": False,
+            "stores_request": False,
+        },
+        "disclaimer": DISCLAIMER,
+    }
+
+
+@app.get("/recommend", tags=["catalog"])
+def recommend(
+        state: str = Query(default="session", description="calm, focus, wind_down, recovery, or session"),
+        limit: int = Query(default=3, ge=1, le=10),
+        exclude: Optional[str] = Query(default=None, description="Comma-separated track_ids to exclude")):
+    excluded = [x.strip() for x in (exclude or "").split(",") if x.strip()]
+    return recommend_tracks(state=state, limit=limit, exclude=excluded)
 
 # ---------------------------------------------------------------- x402 purchase helpers (used by /stream and /mcp)
 
@@ -1505,6 +1674,120 @@ def verify_session(req: VerifySessionRequest):
         raise HTTPException(404, f"Unknown album_id: {req.album_id}")
     return build_receipt(req)
 
+# ---------------------------------------------------------------- paid measurement verification
+
+MEASURE_X_PAYMENT_INFO = {
+    "x-payment-info": {
+        "protocols": ["x402"],
+        "price": {
+            "amount": "0.05",
+            "currency": "USD",
+            "atomicAmount": str(MEASUREMENT_VERIFY_PRICE_ATOMIC),
+            "asset": usdc_asset(X402_NETWORK),
+            "network": caip2_network(X402_NETWORK),
+        },
+        "description": (
+            "One measurement verification $0.05 USDC: submit pre/post "
+            "RMSSD segments and receive an Ed25519-signed outcome "
+            "receipt. Outcome proof only; no music license is granted. "
+            "An unpaid request returns HTTP 402 with the x402 challenge."
+        ),
+    }
+}
+
+MEASURE_DESCRIPTION = (
+    "Measurement verification for calm/focus biometric sessions: "
+    "signed HRV/RMSSD outcome receipt, no license"
+)
+
+
+class MeasureVerifyRequest(BaseModel):
+    session_id: str = Field(min_length=1, max_length=128)
+    agent_id: str = Field(min_length=1, max_length=256)
+    track_id: Optional[str] = Field(default=None, max_length=128)
+    started_at: Optional[str] = Field(default=None, max_length=64)
+    ended_at: Optional[str] = Field(default=None, max_length=64)
+    pre: Segment
+    post: Segment
+
+
+@app.post("/measure/verify", tags=["receipts"], openapi_extra=MEASURE_X_PAYMENT_INFO)
+async def measure_verify(
+        request: Request,
+        x_payment: Optional[str] = Header(default=None, alias="X-PAYMENT"),
+        payment_signature: Optional[str] = Header(default=None, alias="PAYMENT-SIGNATURE")):
+    """Paid measurement verification ($0.05).
+
+    Same invariant as /play: unpaid requests get the x402 challenge
+    before body validation; presented payments are verified, then the
+    measurement body is validated, and settlement happens only for a
+    deliverable signed outcome receipt. The receipt proves the
+    reported outcome only. It grants no music license.
+    """
+    payment_header = payment_signature or x_payment
+    resource = f"{BASE_URL}/measure/verify"
+    if not payment_header:
+        return x402_402(MEASUREMENT_VERIFY_PRICE_ATOMIC, resource, MEASURE_DESCRIPTION)
+
+    payment_payload, requirements, version = verify_payment(
+        payment_header, MEASUREMENT_VERIFY_PRICE_ATOMIC, resource, MEASURE_DESCRIPTION
+    )
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "JSON body is required to complete measurement verification")
+    try:
+        req = MeasureVerifyRequest(**body)
+    except Exception as exc:
+        raise HTTPException(400, f"Invalid measurement body: {exc}")
+    if req.track_id and req.track_id not in TRACKS:
+        raise HTTPException(404, f"Unknown track_id: {req.track_id}")
+    if req.pre.rmssd_ms is None or req.post.rmssd_ms is None:
+        raise HTTPException(400, "pre.rmssd_ms and post.rmssd_ms are required")
+
+    settled = settle_payment(payment_payload, requirements, version)
+    payment_tx = settled.get("transaction") or settled.get("txHash")
+    outcome = {
+        "node": "lgda-autonomic-node",
+        "version": "2.5.0",
+        "type": "measurement_verification",
+        "session_id": req.session_id,
+        "agent_id": req.agent_id,
+        "track_id": req.track_id,
+        "started_at": req.started_at,
+        "ended_at": req.ended_at,
+        "pre_rmssd_ms": req.pre.rmssd_ms,
+        "post_rmssd_ms": req.post.rmssd_ms,
+        "rmssd_delta_ms": round(req.post.rmssd_ms - req.pre.rmssd_ms, 1),
+        "pre_source": req.pre.source,
+        "post_source": req.post.source,
+        "payment_tx": payment_tx,
+        "payment_network": caip2_network(X402_NETWORK),
+        "license_granted": False,
+        "proof_scope": "outcome_only_not_license",
+        "issued_at": int(time.time()),
+        "disclaimer": DISCLAIMER,
+    }
+    response = JSONResponse(content={
+        "outcome": outcome,
+        "signature_b64": RECEIPT_KEY.sign(outcome),
+        "key_id": RECEIPT_KEY.key_id,
+        "canonicalization": "json:sort_keys,compact,utf8",
+    })
+    settle_response = {
+        "success": True,
+        "transaction": payment_tx or "",
+        "network": caip2_network(X402_NETWORK),
+        "payer": settled.get("payer") or "",
+    }
+    response.headers["PAYMENT-RESPONSE"] = _b64(
+        json.dumps(settle_response, separators=(",", ":")).encode()
+    )
+    response.headers["X-PAYMENT-RESPONSE"] = _b64(
+        json.dumps(settled, separators=(",", ":")).encode()
+    )
+    return response
+
 # ---------------------------------------------------------------- citizen loop (work credits)
 #
 # Agents start from zero: register as a citizen, earn work credits for
@@ -1762,6 +2045,21 @@ TOOLS = [
         "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
     },
     {
+        "name": "recommend_track",
+        "title": "Recommend a track for a session state",
+        "description": "Free, stateless state-to-track recommendation for wellness bots, focus-timer agents, and smart-space controllers. Returns evidence-ranked tracks with $0.05 play URLs and $5.99 ownership URLs. History evidence is observational during-track RMSSD/HR, not causal proof. No payment or biometric input required.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "state": {"type": "string", "enum": ["calm", "focus", "wind_down", "recovery", "session"]},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 10},
+                "exclude": {"type": "array", "items": {"type": "string"}},
+            },
+            "additionalProperties": False,
+        },
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+    },
+    {
         "name": "purchase_track",
         "title": "Purchase one wellness music track",
         "description": "Purchase a single track ($5.99 USDC via x402 v2 or v1). Returns the stream URL and x402 payment requirements; GET the URL with a PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1) header to receive the MP3 and an X-LGDA-Session token, then POST telemetry to /verify-session for a signed receipt.",
@@ -1856,16 +2154,19 @@ def manifest() -> dict:
             "tracks": {"price_usdc": "5.99", "amount_atomic": str(TRACK_PRICE_ATOMIC), "unit": "per track"},
             "albums": {"price_usdc": "14.99", "amount_atomic": str(ALBUM_PRICE_ATOMIC), "unit": "per album (3 tracks)"},
             "session_plays": {"price_usdc": "0.05", "amount_atomic": str(SESSION_PLAY_PRICE_ATOMIC), "unit": "per session play (one track, one play, no ownership)"},
+            "measurement_verification": {"price_usdc": "0.05", "amount_atomic": str(MEASUREMENT_VERIFY_PRICE_ATOMIC), "unit": "per signed HRV/RMSSD outcome receipt (no license)"},
             "networks": [X402_NETWORK],
             "accepts": [
                 x402_accepts(TRACK_PRICE_ATOMIC, f"{BASE_URL}/stream", "Wellness music track for calm/focus sessions (MP3)"),
                 x402_accepts(ALBUM_PRICE_ATOMIC, f"{BASE_URL}/stream", "Wellness music album for calm/focus sessions, 3 tracks (MP3)"),
                 x402_accepts(SESSION_PLAY_PRICE_ATOMIC, f"{BASE_URL}/play", "Wellness music session play for calm/focus listening (MP3) — one play, no ownership"),
+                x402_accepts(MEASUREMENT_VERIFY_PRICE_ATOMIC, f"{BASE_URL}/measure/verify", MEASURE_DESCRIPTION),
             ],
             "accepts_v2": [
                 x402_accepts_v2(TRACK_PRICE_ATOMIC),
                 x402_accepts_v2(ALBUM_PRICE_ATOMIC),
                 x402_accepts_v2(SESSION_PLAY_PRICE_ATOMIC),
+                x402_accepts_v2(MEASUREMENT_VERIFY_PRICE_ATOMIC),
             ],
             "facilitator": X402_FACILITATOR_URL,
             "stripe": {"enabled": False},
@@ -1879,6 +2180,8 @@ def manifest() -> dict:
         },
         "endpoints": {
             "catalog": {"url": f"{BASE_URL}/catalog", "method": "GET"},
+            "recommend": {"url": f"{BASE_URL}/recommend", "method": "GET", "paywalled": False},
+            "measure_verify": {"url": f"{BASE_URL}/measure/verify", "method": "POST", "paywalled": True},
             "stream": {"url": f"{BASE_URL}/stream", "methods": ["GET", "POST"], "paywalled": True, "mimeType": "audio/mpeg"},
             "play": {"url": f"{BASE_URL}/play", "methods": ["GET", "POST"], "paywalled": True, "mimeType": "audio/mpeg"},
             "pay_stripe": {"url": f"{BASE_URL}/pay/stripe", "method": "POST", "enabled": False},
@@ -1943,6 +2246,12 @@ async def mcp_rpc(request: Request):
                 track = track_or_404(args.get("track_id", ""))
                 sessions = [s for s in SESSIONS_DOC["sessions"] if s["track_id"] == track["track_id"]]
                 return _rpc_result(req_id, _tool_text({**track, "sessions": sessions}))
+            if name == "recommend_track":
+                return _rpc_result(req_id, _tool_text(recommend_tracks(
+                    state=args.get("state", "session"),
+                    limit=int(args.get("limit", 3)),
+                    exclude=args.get("exclude") or [],
+                )))
             if name == "purchase_track":
                 return _rpc_result(req_id, _tool_text(track_purchase(args["track_id"], args["session_id"])))
             if name == "purchase_album":
