@@ -17,6 +17,10 @@ primary_region = "iad"
   cpu_kind = "shared"
   cpus = 1
 
+[[mounts]]
+  source = "lgda_data"
+  destination = "/app/data"
+
 # Secrets (set with `fly secrets set ...`, never in this file):
 #   PAY_TO_ADDRESS        — owner-confirmed wallet for x402 payments
 #   X402_NETWORK          — "base-sepolia" (dev) or "base" (mainnet)
