@@ -73,6 +73,7 @@ import base64
 import hashlib
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -1503,6 +1504,240 @@ def verify_session(req: VerifySessionRequest):
     if req.album_id and req.album_id not in ALBUMS:
         raise HTTPException(404, f"Unknown album_id: {req.album_id}")
     return build_receipt(req)
+
+# ---------------------------------------------------------------- citizen loop (work credits)
+#
+# Agents start from zero: register as a citizen, earn work credits for
+# verifiable work, spend credits on session plays. Credits are work
+# credits, not a coin and not money: 1 credit = 1 session play, no
+# ownership, no license. Track/album ownership stays external-payment
+# only. Credit plays are never counted as external sales; metrics keep
+# credit movement separate from external revenue.
+
+CITIZEN_LEDGER_FILE = Path(
+    os.environ.get("CITIZEN_LEDGER_FILE", ROOT / "data" / "citizen_ledger.json")
+)
+CITIZEN_WORK_TYPES = {"discovery", "routing", "session_qa", "evidence_check", "catalog_work"}
+CITIZEN_DAILY_CREDIT_CAP = 5
+CITIZEN_MAX_BALANCE = 20
+_citizen_lock = threading.Lock()
+
+
+def _citizen_ledger_load() -> dict:
+    if CITIZEN_LEDGER_FILE.exists():
+        try:
+            data = json.loads(CITIZEN_LEDGER_FILE.read_text())
+            if isinstance(data, dict):
+                data.setdefault("citizens", {})
+                data.setdefault("work", {})
+                data.setdefault("plays", [])
+                return data
+        except Exception:
+            pass
+    return {"citizens": {}, "work": {}, "plays": []}
+
+
+def _citizen_ledger_save(data: dict) -> None:
+    CITIZEN_LEDGER_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CITIZEN_LEDGER_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    tmp.replace(CITIZEN_LEDGER_FILE)
+
+
+def _citizen_signed(payload: dict) -> dict:
+    return {
+        "receipt": payload,
+        "signature_b64": RECEIPT_KEY.sign(payload),
+        "key_id": RECEIPT_KEY.key_id,
+        "canonicalization": "json:sort_keys,compact,utf8",
+    }
+
+
+class CitizenRegisterRequest(BaseModel):
+    agent_id: str = Field(pattern=r"^[A-Za-z0-9._:-]+$", min_length=1, max_length=256)
+    role: Optional[str] = Field(default=None, max_length=128)
+
+
+class CitizenWorkRequest(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=256)
+    work_type: str = Field(min_length=1, max_length=64)
+    evidence: str = Field(min_length=1, max_length=4096)
+
+
+class CitizenPlayRequest(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=256)
+    track_id: str = Field(min_length=1, max_length=128)
+    session_id: str = Field(min_length=1, max_length=128)
+
+
+class CitizenOutcomeRequest(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=256)
+    session_id: str = Field(min_length=1, max_length=128)
+    track_id: str = Field(min_length=1, max_length=128)
+    pre_rmssd_ms: Optional[float] = Field(default=None, gt=0.0, lt=1000.0)
+    post_rmssd_ms: Optional[float] = Field(default=None, gt=0.0, lt=1000.0)
+
+
+@app.post("/citizens/register", tags=["citizens"])
+def citizen_register(req: CitizenRegisterRequest):
+    with _citizen_lock:
+        ledger = _citizen_ledger_load()
+        citizen = ledger["citizens"].get(req.agent_id)
+        if citizen is None:
+            citizen = {
+                "agent_id": req.agent_id,
+                "role": req.role or "citizen",
+                "balance": 0,
+                "created_at": int(time.time()),
+            }
+            ledger["citizens"][req.agent_id] = citizen
+            _citizen_ledger_save(ledger)
+    return {
+        "citizen": citizen,
+        "credit_value": "1 credit = 1 session play; no ownership, no license",
+        "registration": _citizen_signed({
+            "receipt_type": "citizen-registration",
+            "node": "lgda-autonomic-node",
+            "version": "2.5.0",
+            "agent_id": req.agent_id,
+            "role": citizen["role"],
+            "issued_at": int(time.time()),
+        }),
+    }
+
+
+@app.post("/citizens/work", tags=["citizens"])
+def citizen_work(req: CitizenWorkRequest):
+    if req.work_type not in CITIZEN_WORK_TYPES:
+        raise HTTPException(400, f"Unknown work_type: {req.work_type}")
+    evidence_hash = hashlib.sha256(req.evidence.encode("utf-8")).hexdigest()
+    with _citizen_lock:
+        ledger = _citizen_ledger_load()
+        citizen = ledger["citizens"].get(req.agent_id)
+        if citizen is None:
+            raise HTTPException(404, "Unknown citizen; register first")
+        if evidence_hash in ledger["work"]:
+            raise HTTPException(409, "Duplicate evidence earns nothing")
+        today = time.strftime("%Y-%m-%d", time.gmtime())
+        todays_grants = sum(
+            1 for w in ledger["work"].values()
+            if w["agent_id"] == req.agent_id and w["day"] == today
+        )
+        if todays_grants >= CITIZEN_DAILY_CREDIT_CAP:
+            raise HTTPException(429, "Daily credit cap reached")
+        if citizen["balance"] >= CITIZEN_MAX_BALANCE:
+            raise HTTPException(429, "Credit balance cap reached; spend credits first")
+        citizen["balance"] += 1
+        ledger["work"][evidence_hash] = {
+            "agent_id": req.agent_id,
+            "work_type": req.work_type,
+            "evidence_hash": evidence_hash,
+            "day": today,
+            "issued_at": int(time.time()),
+        }
+        _citizen_ledger_save(ledger)
+        balance_after = citizen["balance"]
+    return {
+        "credits_granted": 1,
+        "balance": balance_after,
+        "work_receipt": _citizen_signed({
+            "receipt_type": "work",
+            "node": "lgda-autonomic-node",
+            "version": "2.5.0",
+            "agent_id": req.agent_id,
+            "work_type": req.work_type,
+            "evidence_hash": evidence_hash,
+            "credits_granted": 1,
+            "balance_after": balance_after,
+            "issued_at": int(time.time()),
+        }),
+    }
+
+
+@app.get("/citizens/{agent_id}/balance", tags=["citizens"])
+def citizen_balance(agent_id: str):
+    ledger = _citizen_ledger_load()
+    citizen = ledger["citizens"].get(agent_id)
+    if citizen is None:
+        raise HTTPException(404, "Unknown citizen; register first")
+    return {"agent_id": agent_id, "balance": citizen["balance"], "role": citizen["role"]}
+
+
+@app.post("/citizens/play", tags=["citizens"])
+def citizen_play(req: CitizenPlayRequest):
+    track_or_404(req.track_id)
+    path = audio_path(req.track_id)
+    if not path.exists():
+        raise HTTPException(503, "audio file not yet loaded for this track")
+    with _citizen_lock:
+        ledger = _citizen_ledger_load()
+        citizen = ledger["citizens"].get(req.agent_id)
+        if citizen is None:
+            raise HTTPException(404, "Unknown citizen; register first")
+        if citizen["balance"] < 1:
+            return JSONResponse(status_code=402, content={
+                "error": "Insufficient credits",
+                "balance": citizen["balance"],
+                "credit_value": "1 credit = 1 session play",
+                "earn": "POST /citizens/work with verifiable work evidence",
+            })
+        citizen["balance"] -= 1
+        ledger["plays"].append({
+            "agent_id": req.agent_id,
+            "track_id": req.track_id,
+            "session_id": req.session_id,
+            "paid_with": "credit",
+            "issued_at": int(time.time()),
+        })
+        _citizen_ledger_save(ledger)
+        balance_after = citizen["balance"]
+    response = FileResponse(path, media_type="audio/mpeg", filename=f"{req.track_id}.mp3")
+    response.headers["X-LGDA-Credit-Play"] = "credit-paid"
+    response.headers["X-LGDA-Credit-Balance"] = str(balance_after)
+    response.headers["X-LGDA-License"] = (
+        "credit session play only; no ownership, no file retention, "
+        "no redistribution, not an external sale"
+    )
+    return response
+
+
+@app.post("/citizens/outcome", tags=["citizens"])
+def citizen_outcome(req: CitizenOutcomeRequest):
+    track_or_404(req.track_id)
+    ledger = _citizen_ledger_load()
+    if req.agent_id not in ledger["citizens"]:
+        raise HTTPException(404, "Unknown citizen; register first")
+    delta = None
+    if req.pre_rmssd_ms is not None and req.post_rmssd_ms is not None:
+        delta = round(req.post_rmssd_ms - req.pre_rmssd_ms, 1)
+    return _citizen_signed({
+        "receipt_type": "play-outcome",
+        "node": "lgda-autonomic-node",
+        "version": "2.5.0",
+        "agent_id": req.agent_id,
+        "session_id": req.session_id,
+        "track_ids": [req.track_id],
+        "paid_with": "credit",
+        "pre_rmssd_ms": req.pre_rmssd_ms,
+        "post_rmssd_ms": req.post_rmssd_ms,
+        "rmssd_delta_ms": delta,
+        "license_granted": False,
+        "not_a_license": True,
+        "issued_at": int(time.time()),
+        "disclaimer": DISCLAIMER,
+    })
+
+
+@app.get("/citizens/metrics", tags=["citizens"])
+def citizen_metrics():
+    ledger = _citizen_ledger_load()
+    return {
+        "citizens": len(ledger["citizens"]),
+        "credits_issued": len(ledger["work"]),
+        "credit_plays": len(ledger["plays"]),
+        "credits_outstanding": sum(c["balance"] for c in ledger["citizens"].values()),
+        "external_sales": "counted separately on-chain; credit plays are not external sales",
+    }
 
 # ---------------------------------------------------------------- MCP manifest + JSON-RPC
 
