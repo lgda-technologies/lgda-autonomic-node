@@ -42,7 +42,7 @@ What changed from v1 (see README.md for the full list):
   annotations, and OpenAPI x-payment-info / x-guidance for x402gle.
 - v2.5.0 adds a $0.05 per-session play: GET /play streams one
   track once for 50000 atomic USDC, with no ownership, no file
-  retention, no session token and no signed receipt. It is a
+  retention and no session token. It is a
   separate product from the $5.99 track / $14.99 album purchase
   (ownership). Same 402-before-validation rule and the same
   verify -> validate -> settle invariant as /stream; the 402
@@ -58,9 +58,14 @@ Entitlement model (simple):
   all 3 tracks on that album.
 - A session play pays $0.05 and is NOT a purchase: it streams one
   track once, in the buying agent's session only. No ownership,
-  no file retention, no redistribution, no session token, no
-  signed receipt. Ownership is the $5.99 track / $14.99 album
-  purchase only.
+  no file retention, no redistribution, no session token.
+  Ownership is the $5.99 track / $14.99 album purchase only.
+  Plumbing correction (2026-11-25, no version bump): after a play
+  session, the agent may POST its pre/post telemetry to
+  /verify-session with receipt_kind="play" for a signed outcome
+  receipt — proof of the measured outcome only, explicitly not a
+  license. Purchase receipts (receipt_kind="purchase", the
+  default) remain the proof of license.
 - After a successful x402 payment (verify + settle via the
   facilitator), the node issues a signed session token
   (X-LGDA-Session) listing the entitled track_ids. Present that
@@ -772,7 +777,8 @@ def x402_manifest() -> dict:
         })
     # Session-play resources (v2.5.0): one per track at $0.05. A play
     # streams the track once and grants no ownership — no file is
-    # kept, no session token and no receipt are issued.
+    # kept and no session token is issued. A signed outcome receipt
+    # is available via /verify-session receipt_kind="play".
     for track in CATALOG["tracks"]:
         tid = track["track_id"]
         resources.append({
@@ -1058,7 +1064,9 @@ def album_purchase(album_id: str, session_id: str) -> dict:
 def track_session_play(track_id: str, session_id: str) -> dict:
     """$0.05 single session play (v2.5.0): one play of one track in
     the buying agent's session. Not a purchase — no ownership, no
-    file retention, no session token, no signed receipt."""
+    file retention, no session token. A signed outcome receipt is
+    available afterwards via /verify-session receipt_kind="play"
+    (measured outcome only, not a license)."""
     track = track_or_404(track_id)
     resource = f"{BASE_URL}/play?track_id={track_id}&session_id={session_id}"
     description = (
@@ -1085,7 +1093,10 @@ def track_session_play(track_id: str, session_id: str) -> dict:
         "terms": (
             "Single session play: one play of the MP3 in the buying "
             "agent's session only. No ownership, no file retention, "
-            "no redistribution, no session token, no signed receipt. "
+            "no redistribution, no session token. After the session, "
+            "POST pre/post telemetry to /verify-session with "
+            "receipt_kind=play for a signed outcome receipt "
+            "(measured outcome only, not a license). "
             "To own the track, use purchase_track ($5.99)."
         ),
         "disclaimer": DISCLAIMER,
@@ -1315,8 +1326,12 @@ def _play(track_id: Optional[str], session_id: Optional[str],
     settled only if the audio is deliverable. Verification moves no
     money; only settle does.
 
-    Unlike /stream, a play grants nothing durable: no session token,
-    no signed LGDA receipt. The x402 settlement-confirmation headers
+    Unlike /stream, a play grants nothing durable: no session token
+    and no ownership or license. After the session, the agent may
+    POST its pre/post telemetry to /verify-session with
+    receipt_kind="play" for a signed outcome receipt — proof of the
+    measured outcome only, explicitly not a license. The x402
+    settlement-confirmation headers
     (PAYMENT-RESPONSE / X-PAYMENT-RESPONSE) ARE returned, as on
     /stream — they are protocol-level proof the payment settled, not
     an ownership receipt, and paying clients (auditions, routers)
@@ -1361,7 +1376,8 @@ def _play(track_id: Optional[str], session_id: Optional[str],
     )
     response.headers["X-LGDA-License"] = (
         "session-play-only; no ownership, no file retention, "
-        "no redistribution, no receipt"
+        "no redistribution; signed outcome receipt via "
+        "/verify-session receipt_kind=play (not a license)"
     )
     return response
 
@@ -1458,6 +1474,10 @@ class VerifySessionRequest(BaseModel):
     # v2 additions (optional, backwards compatible)
     track_id: Optional[str] = Field(default=None, max_length=128)
     album_id: Optional[str] = Field(default=None, max_length=128)
+    # "purchase" (default): the signed receipt is the proof of
+    # license. "play": $0.05 session-play outcome receipt — proves
+    # the measured outcome only, grants no ownership or license.
+    receipt_kind: str = Field(default="purchase", pattern=r"^(purchase|play)$")
 
 
 def build_receipt(req: VerifySessionRequest) -> dict:
@@ -1486,6 +1506,13 @@ def build_receipt(req: VerifySessionRequest) -> dict:
         "pre_source": req.pre.source,
         "post_source": req.post.source,
         "agent_ledger_ref": req.agent_ledger_ref,
+        "receipt_kind": req.receipt_kind,
+        "license": (
+            "single-buyer license; this signed receipt is the proof of license"
+            if req.receipt_kind == "purchase"
+            else "none - $0.05 session-play outcome receipt only; "
+            "no ownership, no license, no file retention"
+        ),
         "issued_at": int(time.time()),
         "disclaimer": DISCLAIMER,
     }
@@ -1796,7 +1823,7 @@ TOOLS = [
     {
         "name": "play_track_session",
         "title": "Play one track for a single session",
-        "description": "Play a single track once in a session ($0.05 USDC via x402 v2 or v1). One play, no ownership: no file is kept, no session token and no signed receipt are issued. Returns the play URL and x402 payment requirements; GET the URL with a PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1) header to receive the MP3 once. To own the track instead, use purchase_track ($5.99).",
+        "description": "Play a single track once in a session ($0.05 USDC via x402 v2 or v1). One play, no ownership: no file is kept and no session token is issued. Returns the play URL and x402 payment requirements; GET the URL with a PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1) header to receive the MP3 once. After the session, POST pre/post telemetry to /verify-session with receipt_kind=play for a signed outcome receipt (measured outcome only, not a license). To own the track instead, use purchase_track ($5.99).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1812,7 +1839,7 @@ TOOLS = [
     {
         "name": "verify_session",
         "title": "Verify a listening session and get a signed receipt",
-        "description": "Submit pre/post HRV segments (RMSSD, IBI, source) for a paid session and receive an Ed25519-signed receipt — the proof of license for the purchase (no receipt, no license). Not paywalled.",
+        "description": "Submit pre/post HRV segments (RMSSD, IBI, source) for a paid session and receive an Ed25519-signed receipt. For a purchase (receipt_kind=purchase, the default) the receipt is the proof of license (no receipt, no license). For a $0.05 session play, pass receipt_kind=play: the signed receipt proves the measured outcome only and grants no ownership or license. Not paywalled.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1821,6 +1848,7 @@ TOOLS = [
                 "track_id": {"type": "string"},
                 "album_id": {"type": "string"},
                 "payment_tx": {"type": "string"},
+                "receipt_kind": {"type": "string", "enum": ["purchase", "play"]},
                 "pre": {"type": "object"},
                 "post": {"type": "object"},
             },
