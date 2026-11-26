@@ -708,6 +708,20 @@ def test_play_bare_post_returns_402():
     assert r.json()["accepts"][0]["maxAmountRequired"] == "50000"
 
 
+def test_calm_play_alias_returns_402_with_calm_resource():
+    r = client.get("/calm/play", params={"track_id": "midnight", "session_id": "t1"})
+    assert r.status_code == 402
+    body = r.json()
+    assert body["accepts"][0]["resource"] == (
+        "https://lgda-music.fly.dev/calm/play?track_id=midnight&session_id=t1"
+    )
+    assert "calm/focus" in body["accepts"][0]["description"]
+    v2 = json.loads(base64.b64decode(r.headers["payment-required"]))
+    assert v2["resource"]["url"] == (
+        "https://lgda-music.fly.dev/calm/play?track_id=midnight&session_id=t1"
+    )
+
+
 def test_play_402_amount_and_per_network_name():
     """The /play 402 carries $0.05 (50000) and the correct per-network
     EIP-712 domain name — 'USD Coin' on mainnet, 'USDC' on

@@ -1274,15 +1274,16 @@ PLAY_X_PAYMENT_INFO = {
 }
 
 
-def _play_resource(track_id: Optional[str], session_id: Optional[str]) -> str:
-    """Resource URL for a /play 402, built from whichever params are
+def _play_resource(track_id: Optional[str], session_id: Optional[str],
+                   path: str = "/play") -> str:
+    """Resource URL for a play 402, built from whichever params are
     present. Mirrors _stream_resource."""
     params = []
     if track_id:
         params.append(f"track_id={track_id}")
     if session_id:
         params.append(f"session_id={session_id}")
-    return f"{BASE_URL}/play" + ("?" + "&".join(params) if params else "")
+    return f"{BASE_URL}{path}" + ("?" + "&".join(params) if params else "")
 
 
 def _play_pricing(track_id: Optional[str]) -> tuple:
@@ -1301,7 +1302,8 @@ def _play_pricing(track_id: Optional[str]) -> tuple:
 
 
 def _play(track_id: Optional[str], session_id: Optional[str],
-          x_payment: Optional[str], payment_signature: Optional[str]):
+          x_payment: Optional[str], payment_signature: Optional[str],
+          resource_path: str = "/play"):
     """$0.05 single session play (v2.5.0).
 
     Same 402-before-validation rule and verify -> validate -> settle
@@ -1324,7 +1326,7 @@ def _play(track_id: Optional[str], session_id: Optional[str],
     """
     payment_header = payment_signature or x_payment
     price, desc = _play_pricing(track_id)
-    resource = _play_resource(track_id, session_id)
+    resource = _play_resource(track_id, session_id, resource_path)
     if not payment_header:
         return x402_402(price, resource, desc)
     payment_payload, requirements, version = verify_payment(
@@ -1379,6 +1381,24 @@ def play_post(
         x_payment: Optional[str] = Header(default=None, alias="X-PAYMENT"),
         payment_signature: Optional[str] = Header(default=None, alias="PAYMENT-SIGNATURE")):
     return _play(track_id, session_id, x_payment, payment_signature)
+
+
+@app.get("/calm/play", tags=["play"], openapi_extra=PLAY_X_PAYMENT_INFO)
+def calm_play_get(
+        track_id: Optional[str] = Query(default=None, description="Track slug, e.g. midnight. Required to complete a play; an unpaid request returns 402 without it."),
+        session_id: Optional[str] = Query(default=None, description="Caller-chosen session id. Required to complete a play."),
+        x_payment: Optional[str] = Header(default=None, alias="X-PAYMENT"),
+        payment_signature: Optional[str] = Header(default=None, alias="PAYMENT-SIGNATURE")):
+    return _play(track_id, session_id, x_payment, payment_signature, "/calm/play")
+
+
+@app.post("/calm/play", tags=["play"], openapi_extra=PLAY_X_PAYMENT_INFO)
+def calm_play_post(
+        track_id: Optional[str] = Query(default=None, description="Track slug, e.g. midnight. Required to complete a play; an unpaid request returns 402 without it."),
+        session_id: Optional[str] = Query(default=None, description="Caller-chosen session id. Required to complete a play."),
+        x_payment: Optional[str] = Header(default=None, alias="X-PAYMENT"),
+        payment_signature: Optional[str] = Header(default=None, alias="PAYMENT-SIGNATURE")):
+    return _play(track_id, session_id, x_payment, payment_signature, "/calm/play")
 
 # ---------------------------------------------------------------- stripe stub
 
