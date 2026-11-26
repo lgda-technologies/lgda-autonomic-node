@@ -213,6 +213,36 @@ def test_verify_session_receipt_signature_verifies():
     pub = Ed25519PublicKey.from_public_bytes(base64.b64decode(key["public_key_b64"]))
     canonical = json.dumps(body["receipt"], sort_keys=True, separators=(",", ":")).encode()
     pub.verify(base64.b64decode(body["signature_b64"]), canonical)  # raises if bad
+    # Default receipt_kind is a purchase: the proof of license.
+    assert body["receipt"]["receipt_kind"] == "purchase"
+    assert "proof of license" in body["receipt"]["license"]
+
+
+def test_verify_session_play_receipt_is_outcome_only_not_license():
+    payload = {
+        "session_id": "s-play",
+        "agent_id": "agent-1",
+        "track_id": "midnight",
+        "receipt_kind": "play",
+        "pre": {"rmssd_ms": 70.0, "source": "rppg"},
+        "post": {"rmssd_ms": 65.0, "source": "rppg"},
+    }
+    r = client.post("/verify-session", json=payload)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["receipt"]["receipt_kind"] == "play"
+    assert body["receipt"]["rmssd_delta_ms"] == -5.0
+    assert "no ownership, no license" in body["receipt"]["license"]
+    # The play receipt is still Ed25519-signed and verifiable.
+    key = client.get("/.well-known/receipt-key").json()
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    pub = Ed25519PublicKey.from_public_bytes(base64.b64decode(key["public_key_b64"]))
+    canonical = json.dumps(body["receipt"], sort_keys=True, separators=(",", ":")).encode()
+    pub.verify(base64.b64decode(body["signature_b64"]), canonical)  # raises if bad
+    # An unknown receipt_kind is rejected, never silently signed.
+    bad = client.post("/verify-session", json={**payload, "receipt_kind": "free"})
+    assert bad.status_code == 422
 
 
 def test_mcp_jsonrpc_tools_list_and_call():

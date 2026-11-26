@@ -100,7 +100,9 @@ rows shown — the header figures are recorded verbatim in
 Or, for a single session play instead of ownership:
 `tools/call play_track_session` (`track_id`, `session_id`) — $0.05 —
 then `GET /play?track_id=...&session_id=...` with the payment header.
-One play, no file kept, no token, no receipt.
+One play, no file kept, no token. After the session, `POST /verify-session`
+with `receipt_kind: "play"` returns a signed outcome receipt (measured
+outcome only, not a license).
 
 ### x402 versions (dual-serve, v2.2.0)
 
@@ -141,8 +143,8 @@ the SEP-2127 server card (`/mcp/server-card`) + AI Catalog
 annotations, and OpenAPI `x-payment-info` / `x-guidance` for x402gle.
 
 v2.5.0 adds a $0.05 per-session play: `GET /play` streams one track
-once for 50000 atomic USDC, with no ownership, no file retention, no
-session token and no signed receipt. It is a separate product from
+once for 50000 atomic USDC, with no ownership, no file retention and
+no session token. It is a separate product from
 the $5.99 track / $14.99 album purchase (ownership). Same
 402-before-validation rule and the same verify → validate → settle
 invariant as `/stream`; the 402 carries the per-network EIP-712
@@ -159,7 +161,9 @@ resources alongside the 36 purchase resources, and the MCP tool
   lists the entitled `track_ids` and is Ed25519-signed by the node.
 - A session play ($0.05) is NOT a purchase: it streams one track once,
   in the buying agent's session only. No ownership, no file retention,
-  no redistribution, no session token, no receipt. A session token
+  no redistribution, no session token. Its signed receipt
+  (`receipt_kind: "play"`) proves the measured outcome only and is
+  explicitly not a license. A session token
   from a purchase does not grant a free play — `/play` always requires
   a fresh $0.05 payment.
 - `/stream` checks, in order: no valid payment or session token →
@@ -186,7 +190,9 @@ Ed25519-signed receipt as proof of license — no receipt, no license.
   model on it. Those need a separate license.
 - **Session plays grant no license at all:** a $0.05 play is one play
   of one track in the buying agent's session only — no ownership, no
-  file retention, no redistribution, no receipt. Keeping or reusing
+  file retention, no redistribution. A play's signed outcome receipt
+  (`receipt_kind: "play"`) is proof of the measured outcome only and
+  grants no license. Keeping or reusing
   the audio beyond the paid session needs a purchase ($5.99 track /
   $14.99 album).
 - **Wellness only:** the music is wellness music, not a medical device
@@ -204,8 +210,8 @@ Ed25519-signed receipt as proof of license — no receipt, no license.
 | `GET /mcp` | MCP manifest (v2.5.0, 6 tools) |
 | `POST /mcp` | JSON-RPC: `initialize`, `ping`, `tools/list`, `tools/call` |
 | `GET\|POST /stream` | x402-paywalled MP3 (see above) |
-| `GET\|POST /play` | $0.05 single session play: one track, one play, no ownership, no token, no receipt |
-| `POST /verify-session` | Signed HRV receipt (v1-compatible shape + optional `track_id`/`album_id`) |
+| `GET\|POST /play` | $0.05 single session play: one track, one play, no ownership, no token; signed outcome receipt via `/verify-session` |
+| `POST /verify-session` | Signed HRV receipt (v1-compatible shape + optional `track_id`/`album_id`/`receipt_kind`); purchase receipts prove the license, `receipt_kind: "play"` receipts prove the measured outcome only |
 | `POST /pay/stripe` | Stub: `{"enabled": false}` until Stripe is implemented |
 | `GET /.well-known/receipt-key` | Ed25519 public key (JWK) |
 | `GET /.well-known/x402`, `/.well-known/x402.json` | x402 discovery manifest (paid endpoints) |
