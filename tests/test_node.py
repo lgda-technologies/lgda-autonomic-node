@@ -745,7 +745,10 @@ def test_calm_play_alias_returns_402_with_calm_resource():
     assert body["accepts"][0]["resource"] == (
         "https://lgda-music.fly.dev/calm/play?track_id=midnight&session_id=t1"
     )
-    assert "calm/focus" in body["accepts"][0]["description"]
+    description = body["accepts"][0]["description"]
+    assert "Calm music" in description
+    assert "focus music" in description
+    assert "HRV measured session" in description
     v2 = json.loads(base64.b64decode(r.headers["payment-required"]))
     assert v2["resource"]["url"] == (
         "https://lgda-music.fly.dev/calm/play?track_id=midnight&session_id=t1"
