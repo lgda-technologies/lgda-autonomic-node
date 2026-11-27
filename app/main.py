@@ -730,7 +730,7 @@ def x402_manifest() -> dict:
             "resource": f"{BASE_URL}/stream?track_id={tid}&session_id=your-session-id",
             "type": "http",
             "method": "GET",
-            "description": f"Calm music and focus music track for an HRV measured session: {track['title']} ({track['album']}) — MP3, RMSSD music evidence",
+            "description": f"Calm music and focus music track for an HRV measured session: {track['title']} ({track['album']}) — MP3, RMSSD music evidence; music to calm down",
             "accepts": [x402_accepts_v2(TRACK_PRICE_ATOMIC)],
             "inputSchema": {
                 "type": "object",
@@ -756,7 +756,7 @@ def x402_manifest() -> dict:
             "type": "http",
             "method": "GET",
             "description": (
-                f"Calm music and focus music album for an HRV measured session: {album['title']} (3 MP3 tracks, RMSSD music evidence) — "
+                f"Calm music and focus music album for an HRV measured session: {album['title']} (3 MP3 tracks, RMSSD music evidence; music to calm down) — "
                 "one $14.99 payment entitles all 3 tracks; the first track "
                 "is served immediately and the X-LGDA-Session token unlocks "
                 "the other two"
@@ -788,7 +788,34 @@ def x402_manifest() -> dict:
             "type": "http",
             "method": "GET",
             "description": (
-                f"Calm music session play for focus music listening in an HRV measured session: {track['title']} "
+                f"Calm music session play — music to calm down or focus music listening in an HRV measured session: {track['title']} "
+                f"({track['album']}) — one $0.05 play, MP3, RMSSD music evidence; music to calm down, no ownership"
+            ),
+            "accepts": [x402_accepts_v2(SESSION_PLAY_PRICE_ATOMIC)],
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "track_id": {"type": "string", "const": tid},
+                    "session_id": {"type": "string", "description": "Caller-chosen session id"},
+                },
+                "required": ["track_id", "session_id"],
+            },
+            "outputSchema": {
+                "type": "string",
+                "contentMediaType": "audio/mpeg",
+                "description": "MP3 audio file (single play; no file is kept)",
+            },
+        })
+    # Calm-play alias resources: same $0.05 play on the /calm/play
+    # route so calm-intent indexes see a calm-slugged paid resource.
+    for track in CATALOG["tracks"]:
+        tid = track["track_id"]
+        resources.append({
+            "resource": f"{BASE_URL}/calm/play?track_id={tid}&session_id=your-session-id",
+            "type": "http",
+            "method": "GET",
+            "description": (
+                f"Calm music session play — music to calm down or focus music listening in an HRV measured session: {track['title']} "
                 f"({track['album']}) — one $0.05 play, MP3, RMSSD music evidence, no ownership"
             ),
             "accepts": [x402_accepts_v2(SESSION_PLAY_PRICE_ATOMIC)],
@@ -810,7 +837,7 @@ def x402_manifest() -> dict:
         {
             "path": "/stream",
             "method": "GET",
-            "description": "Buy one calm music and focus music track for an HRV measured session (MP3, RMSSD music evidence)",
+            "description": "Buy one calm music and focus music track for an HRV measured session (MP3, RMSSD music evidence; music to calm down)",
             "price_usd": TRACK_PRICE_USD,
             "maxAmountRequired": str(TRACK_PRICE_ATOMIC),
             "network": network,
@@ -822,7 +849,7 @@ def x402_manifest() -> dict:
         {
             "path": "/stream",
             "method": "GET",
-            "description": "Buy one calm music and focus music album for an HRV measured session (3 MP3 tracks, $14.99, RMSSD music evidence)",
+            "description": "Buy one calm music and focus music album — music to calm down, for an HRV measured session (3 MP3 tracks, $14.99, RMSSD music evidence)",
             "price_usd": ALBUM_PRICE_USD,
             "maxAmountRequired": str(ALBUM_PRICE_ATOMIC),
             "network": network,
@@ -1022,11 +1049,11 @@ def track_purchase(track_id: str, session_id: str) -> dict:
         "method": "GET",
         "x402": {
             "x402Version": 1,
-            "accepts": [x402_accepts(TRACK_PRICE_ATOMIC, resource, f"Calm music and focus music track: {track['title']} (MP3)")],
+            "accepts": [x402_accepts(TRACK_PRICE_ATOMIC, resource, f"Calm music and focus music track — music to calm down: {track['title']} (MP3)")],
             "facilitator": X402_FACILITATOR_URL,
         },
         "x402_v2": x402_payment_required_v2(
-            TRACK_PRICE_ATOMIC, resource, f"Calm music and focus music track: {track['title']} (MP3)"
+            TRACK_PRICE_ATOMIC, resource, f"Calm music and focus music track — music to calm down: {track['title']} (MP3)"
         ),
         "verify_session_url": f"{BASE_URL}/verify-session",
         "audio_loaded": audio_path(track_id).exists(),
@@ -1050,11 +1077,11 @@ def album_purchase(album_id: str, session_id: str) -> dict:
         "method": "GET",
         "x402": {
             "x402Version": 1,
-            "accepts": [x402_accepts(ALBUM_PRICE_ATOMIC, resource, f"Calm music and focus music album: {album['title']} (3 MP3 tracks)")],
+            "accepts": [x402_accepts(ALBUM_PRICE_ATOMIC, resource, f"Calm music and focus music album — music to calm down: {album['title']} (3 MP3 tracks)")],
             "facilitator": X402_FACILITATOR_URL,
         },
         "x402_v2": x402_payment_required_v2(
-            ALBUM_PRICE_ATOMIC, resource, f"Calm music and focus music album: {album['title']} (3 MP3 tracks)"
+            ALBUM_PRICE_ATOMIC, resource, f"Calm music and focus music album — music to calm down: {album['title']} (3 MP3 tracks)"
         ),
         "verify_session_url": f"{BASE_URL}/verify-session",
         "audio_loaded": {t: audio_path(t).exists() for t in album["track_ids"]},
@@ -1072,7 +1099,7 @@ def track_session_play(track_id: str, session_id: str) -> dict:
     track = track_or_404(track_id)
     resource = f"{BASE_URL}/play?track_id={track_id}&session_id={session_id}"
     description = (
-        f"Calm music session play for focus music listening in an HRV measured session: {track['title']} (MP3) — "
+        f"Calm music session play — music to calm down or focus music listening in an HRV measured session: {track['title']} (MP3) — "
         "one play, RMSSD music evidence, no ownership"
     )
     return {
@@ -1131,12 +1158,12 @@ def _stream_pricing(track_id: Optional[str],
     if album_id:
         album = ALBUMS.get(album_id)
         if album:
-            return ALBUM_PRICE_ATOMIC, f"Calm music and focus music album for an HRV measured session: {album['title']} (3 MP3 tracks)"
-        return ALBUM_PRICE_ATOMIC, "Calm music and focus music album for an HRV measured session (3 MP3 tracks)"
+            return ALBUM_PRICE_ATOMIC, f"Calm music and focus music album — music to calm down, for an HRV measured session: {album['title']} (3 MP3 tracks)"
+        return ALBUM_PRICE_ATOMIC, "Calm music and focus music album — music to calm down, for an HRV measured session (3 MP3 tracks)"
     track = TRACKS.get(track_id) if track_id else None
     if track:
-        return TRACK_PRICE_ATOMIC, f"Calm music and focus music track for an HRV measured session: {track['title']} (MP3)"
-    return TRACK_PRICE_ATOMIC, "Calm music and focus music track for an HRV measured session (MP3)"
+        return TRACK_PRICE_ATOMIC, f"Calm music and focus music track — music to calm down, for an HRV measured session: {track['title']} (MP3)"
+    return TRACK_PRICE_ATOMIC, "Calm music and focus music track — music to calm down, for an HRV measured session (MP3)"
 
 
 # x402gle's discovery prefers OpenAPI with an x-payment-info block on
@@ -1307,11 +1334,11 @@ def _play_pricing(track_id: Optional[str]) -> tuple:
     track = TRACKS.get(track_id) if track_id else None
     if track:
         return SESSION_PLAY_PRICE_ATOMIC, (
-            f"Calm music session play for focus music listening in an HRV measured session: {track['title']} (MP3) — "
+            f"Calm music session play — music to calm down or focus music listening in an HRV measured session: {track['title']} (MP3) — "
             "one play, RMSSD music evidence, no ownership"
         )
     return SESSION_PLAY_PRICE_ATOMIC, (
-        "Calm music session play for focus music listening in an HRV measured session (MP3) — one play, RMSSD music evidence, no ownership"
+        "Calm music session play — music to calm down or focus music listening in an HRV measured session (MP3) — one play, RMSSD music evidence, no ownership"
     )
 
 
@@ -1888,9 +1915,9 @@ def manifest() -> dict:
             "session_plays": {"price_usdc": "0.05", "amount_atomic": str(SESSION_PLAY_PRICE_ATOMIC), "unit": "per session play (one track, one play, no ownership)"},
             "networks": [X402_NETWORK],
             "accepts": [
-                x402_accepts(TRACK_PRICE_ATOMIC, f"{BASE_URL}/stream", "Calm music and focus music track for an HRV measured session (MP3)"),
+                x402_accepts(TRACK_PRICE_ATOMIC, f"{BASE_URL}/stream", "Calm music and focus music track — music to calm down, for an HRV measured session (MP3)"),
                 x402_accepts(ALBUM_PRICE_ATOMIC, f"{BASE_URL}/stream", "Calm music and focus music album for an HRV measured session, 3 tracks (MP3)"),
-                x402_accepts(SESSION_PLAY_PRICE_ATOMIC, f"{BASE_URL}/play", "Calm music session play for focus music listening in an HRV measured session (MP3) — one play, RMSSD music evidence, no ownership"),
+                x402_accepts(SESSION_PLAY_PRICE_ATOMIC, f"{BASE_URL}/play", "Calm music session play — music to calm down or focus music listening in an HRV measured session (MP3) — one play, RMSSD music evidence, no ownership"),
             ],
             "accepts_v2": [
                 x402_accepts_v2(TRACK_PRICE_ATOMIC),
