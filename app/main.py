@@ -86,7 +86,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 try:
@@ -123,6 +123,9 @@ TRUST_KEY_FILE = Path(
     os.environ.get("X402_TRUST_KEY_FILE", ROOT / "data" / "x402_trust_key.json")
 )
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+CARD_CHECKOUT_URL = os.environ.get(
+    "LGDA_CARD_CHECKOUT_URL", "https://lgda-technologies.base44.app/vault"
+).rstrip("/")
 
 DISCLAIMER = (
     "Wellness music. Not a medical device; rPPG-derived HRV values "
@@ -168,6 +171,20 @@ with open(ROOT / "sessions.json") as f:
 
 TRACKS = {t["track_id"]: t for t in CATALOG["tracks"]}
 ALBUMS = {a["album_id"]: a for a in CATALOG["albums"]}
+EVIDENCE_TRACK_IDS = [
+    "higher-ground",
+    "the-golden-child",
+    "midnight",
+    "grand-entrance",
+    "been-with-us",
+    "black-summer",
+]
+INTENT_PLAY_ALIASES = [
+    ("/focus/play", "Focus music session play"),
+    ("/hrv/play", "HRV measured session play"),
+    ("/rmssd/play", "RMSSD music session play"),
+    ("/calm-down/play", "Music to calm down session play"),
+]
 assert len(TRACKS) == 27 and len(ALBUMS) == 9
 
 # ---------------------------------------------------------------- keys
@@ -833,6 +850,36 @@ def x402_manifest() -> dict:
                 "description": "MP3 audio file (single play; no file is kept)",
             },
         })
+    # Intent-play alias resources for the evidence-bearing tracks:
+    # same $0.05 play on intent-slugged routes so routers that rank
+    # by resource path can surface LGDA for focus/HRV/RMSSD/calm-down
+    # asks without duplicating the full catalog for every phrase.
+    for alias_path, alias_label in INTENT_PLAY_ALIASES:
+        for tid in EVIDENCE_TRACK_IDS:
+            track = TRACKS[tid]
+            resources.append({
+                "resource": f"{BASE_URL}{alias_path}?track_id={tid}&session_id=your-session-id",
+                "type": "http",
+                "method": "GET",
+                "description": (
+                    f"{alias_label} — calm music and focus music for an HRV measured session: {track['title']} "
+                    f"({track['album']}) — one $0.05 play, MP3, RMSSD music evidence; music to calm down, no ownership"
+                ),
+                "accepts": [x402_accepts_v2(SESSION_PLAY_PRICE_ATOMIC)],
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "track_id": {"type": "string", "const": tid},
+                        "session_id": {"type": "string", "description": "Caller-chosen session id"},
+                    },
+                    "required": ["track_id", "session_id"],
+                },
+                "outputSchema": {
+                    "type": "string",
+                    "contentMediaType": "audio/mpeg",
+                    "description": "MP3 audio file (single play; no file is kept)",
+                },
+            })
     endpoints = [
         {
             "path": "/stream",
@@ -871,6 +918,19 @@ def x402_manifest() -> dict:
             "parameters": ["track_id", "session_id"],
         },
     ]
+    for alias_path, alias_label in INTENT_PLAY_ALIASES:
+        endpoints.append({
+            "path": alias_path,
+            "method": "GET",
+            "description": f"{alias_label} — calm music and focus music in an HRV measured session (MP3, $0.05, RMSSD music evidence; music to calm down, no ownership)",
+            "price_usd": SESSION_PLAY_PRICE_USD,
+            "maxAmountRequired": str(SESSION_PLAY_PRICE_ATOMIC),
+            "network": network,
+            "asset": asset,
+            "payTo": PAY_TO_ADDRESS,
+            "mimeType": "audio/mpeg",
+            "parameters": ["track_id", "session_id"],
+        })
     return {
         "x402Version": 2,
         "name": "LGDA Autonomic Pacing Node",
@@ -1446,6 +1506,31 @@ def calm_play_post(
         payment_signature: Optional[str] = Header(default=None, alias="PAYMENT-SIGNATURE")):
     return _play(track_id, session_id, x_payment, payment_signature, "/calm/play")
 
+
+def _intent_play_get(alias_path: str):
+    def handler(
+            track_id: Optional[str] = Query(default=None, description="Track slug, e.g. midnight. Required to complete a play; an unpaid request returns 402 without it."),
+            session_id: Optional[str] = Query(default=None, description="Caller-chosen session id. Required to complete a play."),
+            x_payment: Optional[str] = Header(default=None, alias="X-PAYMENT"),
+            payment_signature: Optional[str] = Header(default=None, alias="PAYMENT-SIGNATURE")):
+        return _play(track_id, session_id, x_payment, payment_signature, alias_path)
+    return handler
+
+
+def _intent_play_post(alias_path: str):
+    def handler(
+            track_id: Optional[str] = Query(default=None, description="Track slug, e.g. midnight. Required to complete a play; an unpaid request returns 402 without it."),
+            session_id: Optional[str] = Query(default=None, description="Caller-chosen session id. Required to complete a play."),
+            x_payment: Optional[str] = Header(default=None, alias="X-PAYMENT"),
+            payment_signature: Optional[str] = Header(default=None, alias="PAYMENT-SIGNATURE")):
+        return _play(track_id, session_id, x_payment, payment_signature, alias_path)
+    return handler
+
+
+for _alias_path, _alias_label in INTENT_PLAY_ALIASES:
+    app.get(_alias_path, tags=["play"], openapi_extra=PLAY_X_PAYMENT_INFO)(_intent_play_get(_alias_path))
+    app.post(_alias_path, tags=["play"], openapi_extra=PLAY_X_PAYMENT_INFO)(_intent_play_post(_alias_path))
+
 # ---------------------------------------------------------------- stripe stub
 
 class PayStripeRequest(BaseModel):
@@ -1459,16 +1544,40 @@ class PayStripeRequest(BaseModel):
     idempotency_key: Optional[str] = Field(default=None, max_length=255)
 
 
+@app.get("/pay/card", tags=["stripe"])
+def pay_card(track_id: Optional[str] = Query(default=None), album_id: Optional[str] = Query(default=None)):
+    """Human card checkout handoff.
+
+    The live card checkout is the LGDA Vault (Stripe Checkout). Track
+    card checkout is $5.99 there. Album card checkout is not routed
+    from the node until the Vault album price is corrected to the
+    $14.99 agent price; album buyers can use x402 at $14.99 now.
+    """
+    if album_id:
+        album_or_404(album_id)
+        return JSONResponse(status_code=409, content={
+            "enabled": False,
+            "error": "Album card checkout is not routed until the Vault album price is corrected to $14.99. Use x402 for the $14.99 album price.",
+            "x402_album_price_usd": ALBUM_PRICE_USD,
+            "card_checkout_url": CARD_CHECKOUT_URL,
+        })
+    if track_id:
+        track_or_404(track_id)
+    return RedirectResponse(CARD_CHECKOUT_URL, status_code=307)
+
+
 @app.post("/pay/stripe", tags=["stripe"])
 def pay_stripe(req: PayStripeRequest):
     if not STRIPE_SECRET_KEY:
         return JSONResponse(status_code=200, content={
             "enabled": False,
-            "error": "Stripe is not configured on this node. Pay with x402 (USDC) instead, or set STRIPE_SECRET_KEY.",
+            "card_checkout_url": CARD_CHECKOUT_URL,
+            "card_checkout": "Human card checkout is live through the LGDA Vault for $5.99 tracks. Album card checkout is held until the Vault album price is corrected to $14.99; x402 album checkout is $14.99 now.",
+            "error": "Direct Stripe checkout is not configured on this node. Use /pay/card for human card checkout or x402 (USDC) for agent checkout.",
         })
-    # Keys present but catalog checkout is not implemented yet — do not
-    # silently take money for the wrong thing.
-    raise HTTPException(501, "Stripe checkout for catalog purchases is not yet implemented in v2; use x402.")
+    # Keys present but direct catalog checkout is not implemented yet —
+    # do not silently take money for the wrong thing.
+    raise HTTPException(501, "Direct Stripe checkout for catalog purchases is not yet implemented in v2; use /pay/card or x402.")
 
 # ---------------------------------------------------------------- verify-session (v1-compatible shape)
 
