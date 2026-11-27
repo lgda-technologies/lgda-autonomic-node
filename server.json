@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "description": "Calm music, focus music, HRV measured session: 27 tracks, x402, RMSSD music receipts.",
+  "description": "Calm music, focus music, music to calm down, HRV measured session: 27 tracks, RMSSD music.",
   "name": "io.github.lgda-technologies/lgda-autonomic-node",
   "remotes": [
     {

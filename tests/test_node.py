@@ -84,6 +84,11 @@ def test_manifest_tools_exist():
     assert "stream_autonomic_frequency" not in names
     assert m["pricing"]["tracks"]["amount_atomic"] == "5990000"
     assert m["pricing"]["albums"]["amount_atomic"] == "14990000"
+    for accept in m["pricing"]["accepts"]:
+        assert "music to calm down" in accept["description"]
+    for tool_name in ["purchase_track", "purchase_album", "play_track_session"]:
+        tool = next(t for t in m["tools"] if t["name"] == tool_name)
+        assert "music to calm down" in tool["description"]
     assert m["pricing"]["session_plays"]["amount_atomic"] == "50000"
     assert m["endpoints"]["play"]["url"] == "https://lgda-music.fly.dev/play"
 
@@ -608,6 +613,10 @@ def test_well_known_x402_manifest():
         assert "track_id=" in album["resource"]  # album pays on a track URL
         assert len(m["endpoints"]) == 3
         assert {e["price_usd"] for e in m["endpoints"]} == {5.99, 14.99, 0.05}
+        for endpoint in m["endpoints"]:
+            assert "music to calm down" in endpoint["description"], path
+        for resource in m["resources"]:
+            assert "music to calm down" in resource["description"], path
 
 
 def test_well_known_x402_trust_txt():

@@ -861,7 +861,7 @@ def x402_manifest() -> dict:
         {
             "path": "/play",
             "method": "GET",
-            "description": "Play one calm music track once as focus music in an HRV measured session (MP3, $0.05, RMSSD music evidence, no ownership)",
+            "description": "Play one calm music track once — music to calm down or focus music in an HRV measured session (MP3, $0.05, RMSSD music evidence, no ownership)",
             "price_usd": SESSION_PLAY_PRICE_USD,
             "maxAmountRequired": str(SESSION_PLAY_PRICE_ATOMIC),
             "network": network,
@@ -920,7 +920,7 @@ def server_card() -> dict:
         "name": "io.github.lgda-technologies/lgda-autonomic-node",
         "version": "2.5.0",
         "title": "LGDA Autonomic Pacing Node",
-        "description": "Calm music, focus music, HRV measured session: 27 tracks, x402, RMSSD music receipts.",
+        "description": "Calm music, focus music, music to calm down, HRV measured session: 27 tracks, RMSSD music.",
         "websiteUrl": BASE_URL,
         "remotes": [
             {
@@ -1820,7 +1820,7 @@ TOOLS = [
     {
         "name": "purchase_track",
         "title": "Purchase one calm music track",
-        "description": "Purchase a single calm music and focus music track ($5.99 USDC via x402 v2 or v1). Returns the stream URL and x402 payment requirements; GET the URL with a PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1) header to receive the MP3 and an X-LGDA-Session token, then POST telemetry to /verify-session for a signed receipt.",
+        "description": "Purchase a single calm music and focus music track — music to calm down ($5.99 USDC via x402 v2 or v1). Returns the stream URL and x402 payment requirements; GET the URL with a PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1) header to receive the MP3 and an X-LGDA-Session token, then POST telemetry to /verify-session for a signed receipt.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1836,7 +1836,7 @@ TOOLS = [
     {
         "name": "purchase_album",
         "title": "Purchase a calm music album (3 tracks)",
-        "description": "Purchase a whole calm music and focus music album ($14.99 USDC via x402 v2 or v1). One payment entitles the buyer to all 3 tracks on the album. Returns stream URLs and x402 payment requirements; pay once, then present the issued X-LGDA-Session token to /stream for each track.",
+        "description": "Purchase a whole calm music and focus music album — music to calm down ($14.99 USDC via x402 v2 or v1). One payment entitles the buyer to all 3 tracks on the album. Returns stream URLs and x402 payment requirements; pay once, then present the issued X-LGDA-Session token to /stream for each track.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1897,7 +1897,7 @@ def manifest() -> dict:
         "version": "2.5.0",
         "description": (
             "Stateless M2M node: x402-paid calm music and focus music for HRV measured session listening "
-            "(27 tracks, 9 albums) + signed HRV/RMSSD session receipts. The music is the "
+            "(27 tracks, 9 albums; music to calm down) + signed HRV/RMSSD session receipts. The music is the "
             "product; each track carries its History session evidence."
         ),
         "mcp": {
@@ -1916,7 +1916,7 @@ def manifest() -> dict:
             "networks": [X402_NETWORK],
             "accepts": [
                 x402_accepts(TRACK_PRICE_ATOMIC, f"{BASE_URL}/stream", "Calm music and focus music track — music to calm down, for an HRV measured session (MP3)"),
-                x402_accepts(ALBUM_PRICE_ATOMIC, f"{BASE_URL}/stream", "Calm music and focus music album for an HRV measured session, 3 tracks (MP3)"),
+                x402_accepts(ALBUM_PRICE_ATOMIC, f"{BASE_URL}/stream", "Calm music and focus music album — music to calm down, for an HRV measured session, 3 tracks (MP3)"),
                 x402_accepts(SESSION_PLAY_PRICE_ATOMIC, f"{BASE_URL}/play", "Calm music session play — music to calm down or focus music listening in an HRV measured session (MP3) — one play, RMSSD music evidence, no ownership"),
             ],
             "accepts_v2": [
