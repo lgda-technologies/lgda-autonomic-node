@@ -893,7 +893,7 @@ def server_card() -> dict:
         "name": "io.github.lgda-technologies/lgda-autonomic-node",
         "version": "2.5.0",
         "title": "LGDA Autonomic Pacing Node",
-        "description": "Calm music + focus music: 27 tracks, x402, signed HRV receipts.",
+        "description": "Calm music, focus music, HRV measured session: 27 tracks, x402, RMSSD music receipts.",
         "websiteUrl": BASE_URL,
         "remotes": [
             {
