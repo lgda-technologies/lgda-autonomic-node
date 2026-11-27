@@ -184,6 +184,7 @@ INTENT_PLAY_ALIASES = [
     ("/hrv/play", "HRV measured session play"),
     ("/rmssd/play", "RMSSD music session play"),
     ("/calm-down/play", "Music to calm down session play"),
+    ("/wellness/play", "Wellness music session play"),
 ]
 assert len(TRACKS) == 27 and len(ALBUMS) == 9
 

@@ -602,8 +602,8 @@ def test_well_known_x402_manifest():
         assert m["network"] == "eip155:84532"
         assert m["asset"] == "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
         assert m["payTo"] == "0x8da12fca05e38aeda66f112fcf2ef6036c7bd666"
-        # 27 track + 9 album + 27 session-play + 27 calm-play + 24 intent-play resources.
-        assert len(m["resources"]) == 114, path
+        # 27 track + 9 album + 27 session-play + 27 calm-play + 30 intent-play resources.
+        assert len(m["resources"]) == 120, path
         track = next(x for x in m["resources"] if "track_id=midnight" in x["resource"] and "/stream?" in x["resource"])
         assert track["accepts"][0]["amount"] == "5990000"
         assert track["inputSchema"]["required"] == ["track_id", "session_id"]
@@ -611,7 +611,7 @@ def test_well_known_x402_manifest():
         album = next(x for x in m["resources"] if "album_id=porter-ave" in x["resource"])
         assert album["accepts"][0]["amount"] == "14990000"
         assert "track_id=" in album["resource"]  # album pays on a track URL
-        assert len(m["endpoints"]) == 7
+        assert len(m["endpoints"]) == 8
         assert {e["price_usd"] for e in m["endpoints"]} == {5.99, 14.99, 0.05}
         for endpoint in m["endpoints"]:
             assert "music to calm down" in endpoint["description"], path
@@ -928,9 +928,9 @@ def test_well_known_x402_manifest_includes_session_plays():
     for path in ["/.well-known/x402", "/.well-known/x402.json"]:
         m = client.get(path).json()
         plays = [x for x in m["resources"] if "/play?" in x["resource"]]
-        assert len(plays) == 78, path
+        assert len(plays) == 84, path
         assert len([x for x in plays if "/calm/play?" in x["resource"]]) == 27, path
-        for alias in ["/focus/play?", "/hrv/play?", "/rmssd/play?", "/calm-down/play?"]:
+        for alias in ["/focus/play?", "/hrv/play?", "/rmssd/play?", "/calm-down/play?", "/wellness/play?"]:
             assert len([x for x in plays if alias in x["resource"]]) == 6, path
         for p in plays:
             assert p["accepts"][0]["amount"] == "50000", path
@@ -985,7 +985,7 @@ def test_openapi_play_x_payment_info():
 
 
 def test_intent_play_aliases_return_402():
-    for alias in ["/focus/play", "/hrv/play", "/rmssd/play", "/calm-down/play"]:
+    for alias in ["/focus/play", "/hrv/play", "/rmssd/play", "/calm-down/play", "/wellness/play"]:
         r = client.get(alias, params={"track_id": "higher-ground", "session_id": "t1"})
         assert r.status_code == 402, alias
         assert "music to calm down" in r.text
